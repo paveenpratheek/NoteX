@@ -151,8 +151,16 @@ export async function startServer({
       saveConfig();
       return json(200, { workspace: config.workspace, fabrics: fabrics.length });
     }
+    /* Each fabric with how many images it has and how many are not read yet,
+     * so the page can say where Read images still has work (about 0.1 s a
+     * fabric; a fabric that cannot be read is listed without counts). */
     if (m('GET', /^\/api\/fabrics$/)) {
-      return json(200, { workspace: needWorkspace(), fabrics: listFabrics(needWorkspace()).map(({ name, modified, size }) => ({ name, modified, size })) });
+      const fabrics = listFabrics(needWorkspace()).map(({ name, dir: fdir, modified, size }) => {
+        let counts = { images: null, unread: null };
+        try { const b = buildFabric(fdir, { dataDir: dir }); counts = { images: b.images, unread: b.unread }; } catch (_) { /* shown without counts */ }
+        return { name, modified, size, ...counts };
+      });
+      return json(200, { workspace: needWorkspace(), fabrics });
     }
     if ((p = m('GET', /^\/api\/fabrics\/([^/]+)$/))) {
       const name = decodeURIComponent(p[0]);

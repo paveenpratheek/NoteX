@@ -87,6 +87,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .list button:hover, .tree button:hover { background: var(--soft); }
 .list button.on, .tree button.on { background: var(--acc-soft); }
 .list .when { color: var(--muted); font-size: 11.5px; display: block; }
+.list .when.todo { color: var(--accent); }
 .places input { margin: 8px 8px 0; }
 .places .col-head button { padding: 3px 9px; font-size: 12.5px; }
 .reading-line { padding: 6px 12px; border-bottom: 1px solid var(--line); }

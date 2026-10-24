@@ -129,7 +129,9 @@ async function loadFabrics() {
   ul.replaceChildren();
   for (const f of S.fabrics) {
     const b = el('button', null);
-    b.append(el('span', null, f.name), el('span', 'when', `saved ${f.modified.slice(0, 10)}`));
+    // Where Read images still has work: "29 images to read".
+    const imgs = !f.images ? '' : f.unread ? ` · ${f.unread} image${f.unread === 1 ? '' : 's'} to read` : ` · ${f.images} image${f.images === 1 ? '' : 's'} read`;
+    b.append(el('span', null, f.name), el('span', f.unread ? 'when todo' : 'when', `saved ${f.modified.slice(0, 10)}${imgs}`));
     b.dataset.name = f.name;
     b.addEventListener('click', () => openFabric(f.name));
     const li = el('li', null);
@@ -174,9 +176,16 @@ async function openFabric(name) {
     return;
   }
   S.sections = splitSections(S.built.markdown, name);
-  const imgs = S.built.images ? ` · ${S.built.images} images${S.built.unread ? `, ${S.built.unread} not read` : ''}` : '';
+  const n = S.built.images, unread = S.built.unread;
+  const imgs = !n ? ' · no images' : unread ? ` · ${n} images, ${unread} not read` : ` · ${n} image${n === 1 ? '' : 's'}, all read`;
   $('built').textContent = `${S.built.map.places.length} places${imgs}`;
-  $('read-btn').disabled = !S.built.unread || Boolean(S.state && S.state.reading && !S.state.reading.finished);
+  const busy = Boolean(S.state && S.state.reading && !S.state.reading.finished);
+  $('read-btn').disabled = !unread || busy;
+  $('read-btn').title = busy ? `Reading the images of ${S.state.reading.fabric} - one canvas at a time`
+    : !n ? 'This canvas has no images to read' : !unread ? 'Every image on this canvas is read' : `Have RAGX read ${unread} image${unread === 1 ? '' : 's'} with Haiku, four at a time`;
+  // A finished job's line is about its own canvas, not this one.
+  const job = S.state && S.state.reading;
+  if (job && job.finished && job.fabric !== name) $('reading').hidden = true;
   $('doc').textContent = S.built.markdown;
   renderTree();
   select(S.built.map.places.some((p) => p.id === S.selected) ? S.selected : 'fabric');
@@ -275,7 +284,8 @@ async function followReading() {
   line.textContent = r.error ? `Could not read the images: ${r.error}`
     : `${job.fabric}: ${r.read} image${r.read === 1 ? '' : 's'} read${r.toRead > r.read ? ` of ${r.toRead}` : ''}${r.failed && r.failed.length ? `, ${r.failed.length} failed` : ''}.${r.stopped ? ` Stopped: ${r.stopped}` : ''}`;
   line.classList.toggle('bad', Boolean(r.error || r.stopped));
-  if (job.fabric === S.fabric) openFabric(S.fabric);
+  S.state = st;
+  loadFabrics(); // the list's "to read" counts change; it opens the selected canvas again
 }
 
 async function setRagxFolder() {
