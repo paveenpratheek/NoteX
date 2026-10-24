@@ -9,8 +9,10 @@
  * Origin, when sent, is ter-manager's own page; Host is 127.0.0.1 or
  * localhost on this port, so a re-pointed domain is refused.
  *
- * <data>/config.json keeps the workspace folder; <data>/docs/ keeps the
- * last address document and place map built for each fabric.
+ * <data>/config.json keeps the workspace folder and RAGX's plugin folder;
+ * <data>/docs/ keeps the last address document and place map built for each
+ * fabric; <data>/readings.json and <data>/images/ keep what Read images
+ * found and the images that had no file of their own.
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -21,6 +23,9 @@ import { listFabrics, readFabric, FabricError } from './fabric.js';
 import { buildPlaces } from './places.js';
 import { toMarkdown, toPlaceMap } from './document.js';
 import { writeRuntime, writeLocal } from './lifecycle.js';
+import { fabricImages, Readings } from './images.js';
+import { readFabricImages } from './read.js';
+import { ragxFolder, RagxError } from './ragx.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -36,6 +41,7 @@ class HttpError extends Error {
 function statusOf(e) {
   if (e instanceof HttpError) return e.status;
   if (e instanceof FabricError) return e.code === 'not-found' || e.code === 'no-workspace' ? 404 : e.code === 'bad-json' ? 409 : 500;
+  if (e instanceof RagxError) return 503;
   return 500;
 }
 
@@ -64,20 +70,26 @@ export function fabricDir(workspace, name) {
   return path.join(workspace, name);
 }
 
-export function buildFabric(dir) {
+/* A fabric's document, with its images' files and kept readings when there
+ * is a data folder to keep them in. */
+export function buildFabric(dir, { dataDir = null } = {}) {
   const started = Date.now();
-  const model = buildPlaces(readFabric(dir));
-  return { markdown: toMarkdown(model), map: toPlaceMap(model), ms: Date.now() - started };
+  const fabric = readFabric(dir);
+  const model = buildPlaces(fabric);
+  const images = fabricImages(model, fabric, { dataDir, readings: new Readings(dataDir) });
+  const unread = images.filter((im) => !im.file.image.reading).length;
+  return { markdown: toMarkdown(model), map: toPlaceMap(model), images: images.length, unread, ms: Date.now() - started };
 }
 
 export async function startServer({
-  dataDir, port = DEFAULT_PORT, origins = DEFAULT_ORIGINS, runtimeFile = DEFAULT_RUNTIME, log = console.log, signals = true, onStopped = null,
+  dataDir, port = DEFAULT_PORT, origins = DEFAULT_ORIGINS, runtimeFile = DEFAULT_RUNTIME, log = console.log, signals = true, onStopped = null, ragx = null,
 } = {}) {
   const dir = path.resolve(dataDir);
   fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
   const configFile = path.join(dir, 'config.json');
   let config = {};
   try { config = JSON.parse(fs.readFileSync(configFile, 'utf8')); } catch (_) { /* first start */ }
+  if (ragx) config.ragx = ragx; // tests and --ragx point it elsewhere for this run
   const saveConfig = () => fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
 
   const workspaceState = () => {
@@ -89,6 +101,7 @@ export async function startServer({
     return config.workspace;
   };
 
+  let reading = null; // the Read images job, while it runs and once it is done
   let stopping = false;
   let actualPort = port;
   const token = crypto.randomBytes(24).toString('base64url');
@@ -107,7 +120,27 @@ export async function startServer({
     let p;
 
     if (m('GET', /^\/api\/state$/)) {
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ...workspaceState() });
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, ...workspaceState() });
+    }
+    if (m('PUT', /^\/api\/ragx$/)) {
+      const body = await readJson(req);
+      const folder = typeof body.path === 'string' ? body.path.trim().replace(/^"(.*)"$/, '$1') : '';
+      if (!folder || !path.isAbsolute(folder) || !fs.existsSync(path.join(folder, 'plugin.json'))) throw new HttpError(400, 'bad-path', 'Give RAGX\'s plugin folder as a full path - the one holding its plugin.json.');
+      config.ragx = path.resolve(folder);
+      saveConfig();
+      return json(200, { ragx: config.ragx });
+    }
+    /* Read images: one fabric at a time, in the background; the page follows
+     * it through /api/state (t-6b38e0dc27). */
+    if ((p = m('POST', /^\/api\/fabrics\/([^/]+)\/read$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      if (reading && !reading.finished) throw new HttpError(409, 'busy', `Already reading the images of ${reading.fabric}.`);
+      reading = { fabric: name, done: 0, total: null, failed: 0, finished: false, result: null };
+      const job = reading;
+      readFabricImages(fdir, { dataDir: dir, ragx: config.ragx, onProgress: (pr) => Object.assign(job, pr) })
+        .then((r) => Object.assign(job, { finished: true, result: r }), (e) => Object.assign(job, { finished: true, result: { error: e.message } }));
+      return json(202, { reading: name });
     }
     if (m('PUT', /^\/api\/workspace$/)) {
       const body = await readJson(req);
@@ -123,7 +156,7 @@ export async function startServer({
     }
     if ((p = m('GET', /^\/api\/fabrics\/([^/]+)$/))) {
       const name = decodeURIComponent(p[0]);
-      const built = buildFabric(fabricDir(needWorkspace(), name));
+      const built = buildFabric(fabricDir(needWorkspace(), name), { dataDir: dir });
       // The last build is kept, so what NoteX made can be read outside the page.
       fs.writeFileSync(path.join(dir, 'docs', `${name}.notex.md`), built.markdown);
       fs.writeFileSync(path.join(dir, 'docs', `${name}.places.json`), JSON.stringify(built.map, null, 2));

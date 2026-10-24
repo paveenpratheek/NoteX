@@ -53,7 +53,7 @@ test('books, folders, hidden files and drawings File Fabric never draws are left
 test('files, text and pen strokes are filed where they sit', () => {
   const at = byAddress(build());
   const survey = at.get('RESEARCH (totem) > GAP PAPERS > LITERATURE SURVEY');
-  assert.deepEqual(survey.files, [{ name: 'survey-2024.pdf', kind: 'PDF', url: null, inSources: true }]);
+  assert.deepEqual(survey.files, [{ id: 'F-a', name: 'survey-2024.pdf', kind: 'PDF', url: null, inSources: true }]);
   assert.equal(survey.pens, 1);
   assert.deepEqual(at.get('RESEARCH (totem) > GAP PAPERS').texts, ['Need for orthorectification\n& more']);
   assert.deepEqual(at.get('RESEARCH (totem)').files.map((f) => f.name), ['near-totem.pdf']);

@@ -8,15 +8,21 @@ import path from 'node:path';
 import { listFabrics, isFabric, FabricError } from './lib/fabric.js';
 import { buildFabric, startServer } from './lib/server.js';
 import { writeLocal, REPO } from './lib/lifecycle.js';
+import { readFabricImages } from './lib/read.js';
+import { RagxError } from './lib/ragx.js';
 
 const USAGE = `usage: node engine/cli.js <command>
 
-  build <folder> [--out <dir>]
+  build <folder> [--out <dir>] [--data-dir <folder>]
                           a fabric (a folder holding fabric.json) or a whole
                           workspace as address documents and place maps;
-                          one fabric with no --out prints its document
+                          one fabric with no --out prints its document;
+                          with --data-dir, images carry their kept readings
+  read <fabric> --data-dir <folder> [--ragx <RAGX plugin folder>]
+                          have RAGX's engine read the fabric's images, four
+                          at a time, keeping the readings in the data folder
   fabrics <workspace>     the fabrics in a workspace, newest first
-  serve --data-dir <folder> [--port 7781] [--origin <url,url>]
+  serve --data-dir <folder> [--port 7781] [--origin <url,url>] [--ragx <folder>]
                           run as the plugin's server on 127.0.0.1 (Ctrl+C stops it)
   plugin-setup            once: tells the plugin where the engine is`;
 
@@ -64,8 +70,9 @@ async function main(argv) {
     case 'build': {
       const folder = rest[0];
       if (!folder) throw new UsageError('build needs a fabric or workspace folder.');
+      const dataDir = opts['data-dir'] || null;
       if (isFabric(folder)) {
-        const built = buildFabric(folder);
+        const built = buildFabric(folder, { dataDir });
         if (!opts.out) { process.stdout.write(built.markdown); return 0; }
         writeBuilt(opts.out, path.basename(path.resolve(folder)), built);
         return 0;
@@ -73,9 +80,24 @@ async function main(argv) {
       if (!opts.out) throw new UsageError('A whole workspace needs --out <dir> for its documents.');
       let failed = 0;
       for (const f of listFabrics(folder)) {
-        try { writeBuilt(opts.out, f.name, buildFabric(f.dir)); } catch (e) { failed++; console.log(`✗ ${f.name}: ${e.message}`); }
+        try { writeBuilt(opts.out, f.name, buildFabric(f.dir, { dataDir })); } catch (e) { failed++; console.log(`✗ ${f.name}: ${e.message}`); }
       }
       return failed ? 1 : 0;
+    }
+    case 'read': {
+      if (!rest[0] || !isFabric(rest[0])) throw new UsageError('read needs a fabric folder (one holding fabric.json).');
+      if (!opts['data-dir']) throw new UsageError('Give the folder NoteX keeps readings in: --data-dir <folder>');
+      const started = Date.now();
+      let last = -1;
+      const r = await readFabricImages(rest[0], {
+        dataDir: opts['data-dir'], ragx: opts.ragx || null,
+        onProgress: ({ done, total }) => { if (done !== last) { last = done; console.log(`  read ${done}/${total}`); } },
+      });
+      console.log(`${r.fabric}: ${r.images} images, ${r.toRead} to read, ${r.read} read in ${Math.round((Date.now() - started) / 1000)} s`
+        + `${r.failed.length ? `, ${r.failed.length} failed` : ''}`);
+      for (const f of r.failed) console.log(`  ✗ ${f.name}: ${f.error}`);
+      if (r.stopped) console.log(`Stopped: ${r.stopped}`);
+      return r.stopped || r.failed.length ? 1 : 0;
     }
     case 'serve': {
       if (!opts['data-dir']) throw new UsageError('Give the folder NoteX keeps its settings in: --data-dir <folder>');
@@ -83,6 +105,7 @@ async function main(argv) {
         dataDir: opts['data-dir'],
         port: opts.port ? Number(opts.port) : undefined,
         origins: opts.origin ? opts.origin.split(',').map((o) => o.trim()) : undefined,
+        ragx: opts.ragx || null,
         onStopped: () => process.exit(0),
       });
       console.log(`NoteX engine ready at ${s.url}`);
@@ -97,7 +120,7 @@ async function main(argv) {
 }
 
 main(process.argv.slice(2)).then((code) => { if (code !== null) process.exitCode = code; }, (e) => {
-  if (e instanceof UsageError || e instanceof FabricError) { console.error(e.message); process.exitCode = 2; return; }
+  if (e instanceof UsageError || e instanceof FabricError || e instanceof RagxError) { console.error(e.message); process.exitCode = 2; return; }
   console.error(e.stack || e.message);
   process.exitCode = 1;
 });

@@ -22,6 +22,7 @@
     <button id="menu-btn" class="icon" aria-haspopup="true" aria-expanded="false" title="More">⋯</button>
     <div id="menu" class="popover" hidden>
       <button id="refresh-btn">Check the engine again</button>
+      <button id="ragx-btn">Where RAGX is…</button>
       <button id="stop-btn" class="danger">Stop engine</button>
     </div>
   </div>
@@ -62,7 +63,8 @@
       <ul id="fabric-list" class="list"></ul>
     </aside>
     <aside class="col places">
-      <div class="col-head"><strong id="places-title">Places</strong><span class="note" id="built"></span></div>
+      <div class="col-head"><strong id="places-title">Places</strong><span class="note" id="built"></span><span class="grow"></span><button id="read-btn" title="Have RAGX read this fabric's images with Haiku, four at a time">Read images</button></div>
+      <div class="note reading-line" id="reading" hidden></div>
       <input id="filter" placeholder="Find a place" spellcheck="false">
       <ul id="tree" class="tree"></ul>
     </aside>

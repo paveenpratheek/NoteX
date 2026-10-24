@@ -98,6 +98,7 @@ async function refresh() {
   setStatus('up', `Engine running · ${st.fabrics} fabric${st.fabrics === 1 ? '' : 's'}`);
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
+  if (!was && st.reading && !st.reading.finished) followReading();
 }
 
 function schedule() {
@@ -173,7 +174,9 @@ async function openFabric(name) {
     return;
   }
   S.sections = splitSections(S.built.markdown, name);
-  $('built').textContent = `${S.built.map.places.length} places · ${S.built.ms} ms`;
+  const imgs = S.built.images ? ` · ${S.built.images} images${S.built.unread ? `, ${S.built.unread} not read` : ''}` : '';
+  $('built').textContent = `${S.built.map.places.length} places${imgs}`;
+  $('read-btn').disabled = !S.built.unread || Boolean(S.state && S.state.reading && !S.state.reading.finished);
   $('doc').textContent = S.built.markdown;
   renderTree();
   select(S.built.map.places.some((p) => p.id === S.selected) ? S.selected : 'fabric');
@@ -244,6 +247,45 @@ function showView(v) {
   $('show-doc').classList.toggle('on', v === 'doc');
 }
 
+/* ------------------------------------------------------- Read images */
+
+/* RAGX reads the images with Haiku, four at a time (t-6b38e0dc27); the page
+ * follows the job through /api/state and rebuilds the fabric when it ends. */
+async function readImages() {
+  if (!S.fabric) return;
+  try { await engine.readImages(S.fabric); } catch (e) { toast(e.message, true); return; }
+  $('read-btn').disabled = true;
+  followReading();
+}
+
+async function followReading() {
+  clearTimeout(followReading.timer);
+  let st;
+  try { st = await engine.state(); } catch (_) { st = null; }
+  const job = st && st.reading;
+  const line = $('reading');
+  if (!job) { line.hidden = true; return; }
+  line.hidden = false;
+  if (!job.finished) {
+    line.textContent = job.total == null ? `Reading the images of ${job.fabric}…` : `Reading the images of ${job.fabric}: ${job.done}/${job.total}${job.failed ? `, ${job.failed} failed` : ''}`;
+    followReading.timer = setTimeout(followReading, 1500);
+    return;
+  }
+  const r = job.result || {};
+  line.textContent = r.error ? `Could not read the images: ${r.error}`
+    : `${job.fabric}: ${r.read} image${r.read === 1 ? '' : 's'} read${r.toRead > r.read ? ` of ${r.toRead}` : ''}${r.failed && r.failed.length ? `, ${r.failed.length} failed` : ''}.${r.stopped ? ` Stopped: ${r.stopped}` : ''}`;
+  line.classList.toggle('bad', Boolean(r.error || r.stopped));
+  if (job.fabric === S.fabric) openFabric(S.fabric);
+}
+
+async function setRagxFolder() {
+  $('menu').hidden = true;
+  const now = S.state && S.state.ragx;
+  const p = window.prompt('RAGX\'s plugin folder - the one holding its plugin.json:', now || '');
+  if (!p) return;
+  try { const r = await engine.setRagx(p); toast(`NoteX reads images through RAGX at ${r.ragx}.`); S.state.ragx = r.ragx; } catch (e) { toast(e.message, true); }
+}
+
 /* ------------------------------------------------------------- wiring */
 
 $('start-btn').addEventListener('click', startEngine);
@@ -271,6 +313,8 @@ $('ws-form').addEventListener('submit', async (e) => {
 });
 $('ws-change').addEventListener('click', () => { $('ws-path').value = S.state.workspace || ''; show('workspace'); });
 $('reload').addEventListener('click', loadFabrics);
+$('read-btn').addEventListener('click', readImages);
+$('ragx-btn').addEventListener('click', setRagxFolder);
 $('filter').addEventListener('input', () => S.built && renderTree());
 $('show-place').addEventListener('click', () => showView('place'));
 $('show-doc').addEventListener('click', () => showView('doc'));

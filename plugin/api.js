@@ -67,4 +67,6 @@ export class Engine {
   fabrics() { return this.json('GET', '/api/fabrics'); }
   fabric(name) { return this.json('GET', `/api/fabrics/${encodeURIComponent(name)}`); }
   shutdown() { return this.json('POST', '/api/shutdown'); }
+  readImages(name) { return this.json('POST', `/api/fabrics/${encodeURIComponent(name)}/read`); }
+  setRagx(p) { return this.json('PUT', '/api/ragx', { path: p }); }
 }

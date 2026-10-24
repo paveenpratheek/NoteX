@@ -9,6 +9,7 @@
  *   the place map - the same tree as JSON, for walking from a place to its
  *   parent, children, neighbours and wires by name (t-1a4fa21364).
  */
+import { pathToFileURL } from 'node:url';
 import { inOrder } from './places.js';
 
 const CORNER = { tl: 'top-left', tr: 'top-right', bl: 'bottom-left', br: 'bottom-right' };
@@ -32,6 +33,25 @@ export function safeText(text) {
     if (/^ {0,3}(`{3,}|~{3,})/.test(line)) return `    ${line.trim()}`;
     return line;
   }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/* A file:/// URL RAGX reads as a linked image; brackets are encoded too,
+ * which Node's pathToFileURL leaves as they are. */
+export const fileUrl = (p) => pathToFileURL(p).href.replace(/\(/g, '%28').replace(/\)/g, '%29');
+
+/* One image under its place: what Haiku read in it, for the agent, and
+ * where the file is, for the agent to open and RAGX's page to show - never
+ * the image itself (t-a4bf938570). */
+function imageEntry(f) {
+  const im = f.image;
+  const r = im.reading;
+  const name = one(f.name || 'image');
+  const out = [`**${name}** (image, ${r ? `read by ${r.model || 'haiku'} - machine-read, may contain errors` : 'not read yet - Read images on the NoteX page reads it'})`];
+  if (im.path) out.push(`![${name.replace(/[[\]]/g, '')}](${fileUrl(im.path)})`, `File: ${im.path}`);
+  else out.push('File: only inside fabric.json until NoteX saves it to its data folder.');
+  if (r && r.description) out.push(`Shows: ${one(r.description)}`);
+  if (r && r.text) out.push('Text in it:', safeText(r.text));
+  return out.join('\n');
 }
 
 function describe(p, model) {
@@ -91,10 +111,13 @@ function section(p, model) {
     lines.push('', 'Written on it:');
     for (const t of p.texts) lines.push('', safeText(t));
   }
-  if (p.files.length) {
+  const images = p.files.filter((f) => f.image);
+  const others = p.files.filter((f) => !f.image);
+  if (others.length) {
     lines.push('', 'Files:');
-    for (const f of p.files) lines.push(`- ${one(f.name || 'unnamed')} (${f.kind}${f.url ? `, ${f.url}` : ''})`);
+    for (const f of others) lines.push(`- ${one(f.name || 'unnamed')} (${f.kind}${f.url ? `, ${f.url}` : ''})`);
   }
+  for (const f of images) lines.push('', imageEntry(f));
   if (p.pens) lines.push('', `Handwriting: ${plural(p.pens, 'pen stroke')}, not read yet.`);
   return lines.join('\n');
 }

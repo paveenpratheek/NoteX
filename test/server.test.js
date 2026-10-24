@@ -65,6 +65,39 @@ test('the workspace is set once and its fabrics listed and built', async () => {
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')), { workspace });
 });
 
+test('Read images runs in the background and the next build carries the readings', async () => {
+  const ragx = http.createServer(async (req, res) => {
+    for await (const _ of req);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ kind: 'photo', text: 'GAP', description: 'A whiteboard listing research gaps.', model: 'haiku' }));
+  });
+  await new Promise((r) => ragx.listen(0, '127.0.0.1', r));
+  const folder = path.join(tmp, 'ragx-plugin');
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'plugin.json'), '{}');
+  fs.writeFileSync(path.join(folder, 'runtime.json'), JSON.stringify({ url: `http://127.0.0.1:${ragx.address().port}`, token: 't' }));
+  try {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const state = sampleState();
+    state.files.push({ id: 'img', name: 'board.png', isImage: true, imageDataUrl: `data:image/png;base64,${png}`, x: 200, y: 200, areaId: 'A2', linkedTotemId: 'T1' });
+    fs.mkdirSync(path.join(workspace, 'Board'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, 'Board', 'fabric.json'), JSON.stringify(state));
+    assert.equal((await call('PUT', '/api/ragx', { body: { path: folder } })).status, 200);
+    assert.equal((await call('POST', '/api/fabrics/Board/read')).status, 202);
+    let job;
+    for (let i = 0; i < 50; i++) {
+      job = (await (await call('GET', '/api/state')).json()).reading;
+      if (job.finished) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.equal(job.result.read, 1);
+    const built = await (await call('GET', '/api/fabrics/Board')).json();
+    assert.equal(built.unread, 0);
+    assert.match(built.markdown, /^Shows: A whiteboard listing research gaps\.$/m);
+    assert.ok(fs.readdirSync(path.join(data, 'images')).length === 1);
+  } finally { ragx.close(); }
+});
+
 test('a fabric name cannot climb out of the workspace', async () => {
   // URL parsing folds an encoded ".." away before the route sees it.
   assert.equal(await raw('/api/fabrics/%2E%2E'), 404);

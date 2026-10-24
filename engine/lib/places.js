@@ -156,7 +156,7 @@ export function buildPlaces(fabric) {
     if (f.isHidden) { left.hidden++; continue; }
     const at = placeFor(f, false);
     if (!at) continue;
-    places.get(at).files.push({ name: f.name, kind: fileKind(f), url: f.isYoutube ? f.youtubeUrl || null : null, inSources: fabric.sources ? fabric.sources.has(f.name) : null });
+    places.get(at).files.push({ id: f.id, name: f.name, kind: fileKind(f), url: f.isYoutube ? f.youtubeUrl || null : null, inSources: fabric.sources ? fabric.sources.has(f.name) : null });
   }
   const NEVER_DRAWN = new Set(['path', 'draw', 'select', 'pan', 'delete']);
   for (const d of state.drawings || []) {
