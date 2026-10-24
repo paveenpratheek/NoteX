@@ -1,0 +1,17 @@
+fix(plugin): the page says which canvases still have images to read
+
+The user read Ter-Manager's 39 images, then found Read images greyed out
+on testing1 and took it for not being able to read the other canvases.
+testing1 has no images at all; of the eight canvases only testing2 (29)
+still had any to read, and the page said none of this.
+
+The fabric list now shows each canvas's images - "29 images to read",
+or "39 images read" - counted when the list loads (0.64 s for the
+user's eight). A canvas's header says "no images" or "all read", the
+greyed button says why in its tooltip, and the last job's result line
+shows only on the canvas it read. When a job ends the list is counted
+again. 26 tests pass.
+
+GitX-Fixes: a32977f
+GitX-Thoughts: t-62575ec702
+
