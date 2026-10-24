@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NoteX</title>
+<link rel="stylesheet" href="plugin.css">
+<script src="/plugin-host.js"></script>
+<script type="module" src="plugin.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <span class="dot" id="dot" aria-hidden="true"></span>
+    <strong>NoteX</strong>
+    <span class="status" id="status">Looking for the engine…</span>
+  </div>
+  <div class="grow"></div>
+  <span class="note" id="ws-label"></span>
+  <button id="ws-change" class="link" hidden>Change</button>
+  <div class="menu">
+    <button id="menu-btn" class="icon" aria-haspopup="true" aria-expanded="false" title="More">⋯</button>
+    <div id="menu" class="popover" hidden>
+      <button id="refresh-btn">Check the engine again</button>
+      <button id="stop-btn" class="danger">Stop engine</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="offline" class="center" hidden>
+    <div class="card">
+      <h2>The engine is not running</h2>
+      <p>NoteX reads File Fabric's workspace through a small engine that runs in a ter-manager terminal, where you can watch it and stop it with Ctrl+C. Closing this view leaves it running.</p>
+      <dl class="facts">
+        <dt>Command</dt><dd><code id="start-cmd">…</code></dd>
+        <dt>Data</dt><dd><code id="data-dir">…</code></dd>
+      </dl>
+      <p class="note" id="no-local" hidden>Run <code>node engine/cli.js plugin-setup</code> once in the NoteX folder, so this page knows where the engine is.</p>
+      <div class="row end">
+        <span class="note" id="start-msg"></span>
+        <button id="start-btn" class="primary">Start engine</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="workspace" class="center" hidden>
+    <form class="card" id="ws-form">
+      <h2>Where is File Fabric's workspace?</h2>
+      <p>The folder you picked with <em>Open Target Workspace</em> in File Fabric - the one holding a folder per fabric, each with its <code>fabric.json</code>. NoteX only reads it.</p>
+      <div class="row">
+        <input id="ws-path" placeholder="e.g. E:\FILES\app experiment\spatial filemanager\NEW2" spellcheck="false" required>
+        <button type="submit" class="primary">Use this folder</button>
+      </div>
+      <p class="note bad" id="ws-msg"></p>
+    </form>
+  </section>
+
+  <section id="browse" class="browse" hidden>
+    <aside class="col fabrics">
+      <div class="col-head"><strong>Fabrics</strong><button id="reload" class="icon" title="Read the workspace again">↻</button></div>
+      <ul id="fabric-list" class="list"></ul>
+    </aside>
+    <aside class="col places">
+      <div class="col-head"><strong id="places-title">Places</strong><span class="note" id="built"></span></div>
+      <input id="filter" placeholder="Find a place" spellcheck="false">
+      <ul id="tree" class="tree"></ul>
+    </aside>
+    <article class="col view">
+      <div class="col-head">
+        <code id="address" class="address"></code>
+        <div class="seg">
+          <button id="show-place" class="on">Place</button>
+          <button id="show-doc">Whole document</button>
+        </div>
+      </div>
+      <div id="section" class="section"></div>
+      <pre id="doc" class="doc" hidden></pre>
+    </article>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+</body>
+</html>

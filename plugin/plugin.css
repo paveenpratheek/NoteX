@@ -1,0 +1,114 @@
+/* Built from ter-manager's palette only, as RAGX's page is: plugin-host.js
+ * puts --pal-* on <html> and keeps them current. The fallbacks are for
+ * opening the page on its own. */
+:root {
+  --bg: var(--pal-bg, #f5f5f3);
+  --raise: var(--pal-raise, #ffffff);
+  --fg: var(--pal-fg, #1d1d1f);
+  --accent: var(--pal-accent, #3b6cf6);
+  --on-acc: var(--on-accent, #ffffff);
+  --red: var(--pal-red, #c8352c);
+  --green: var(--pal-green, #23905a);
+  --yellow: var(--pal-yellow, #b98000);
+  --mono-font: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+  --line: color-mix(in srgb, var(--fg) 13%, transparent);
+  --soft: color-mix(in srgb, var(--fg) 5%, var(--raise));
+  --muted: color-mix(in srgb, var(--fg) 62%, transparent);
+  --acc-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --radius: 8px;
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+button, input { font: inherit; color: inherit; }
+button {
+  background: var(--raise); border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 11px; cursor: pointer;
+}
+button:hover { border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--on-acc); border-color: transparent; }
+button.danger { color: var(--red); }
+button.icon { border: none; background: none; padding: 2px 8px; font-size: 18px; line-height: 1; }
+button.link { border: none; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+input { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+input:focus, button:focus-visible { outline: 2px solid var(--acc-soft); outline-offset: 1px; border-color: var(--accent); }
+code, pre { font-family: var(--mono-font); font-size: 12.5px; }
+.note { color: var(--muted); font-size: 12.5px; }
+.bad { color: var(--red); }
+.grow { flex: 1; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row.end { justify-content: flex-end; }
+.row input { flex: 1; min-width: 0; }
+[hidden] { display: none !important; }
+
+/* bar */
+.bar { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raise); }
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.status { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); flex: none; }
+.dot.up { background: var(--green); }
+.dot.wait { background: var(--yellow); }
+#ws-label { max-width: 50ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu { position: relative; }
+.popover {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; min-width: 200px;
+  background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--fg) 14%, transparent); padding: 4px; display: flex; flex-direction: column;
+}
+.popover button { border: none; text-align: left; }
+
+main { flex: 1; min-height: 0; display: flex; }
+.center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto; }
+.card { width: min(640px, 100%); background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.card h2 { margin: 0; font-size: 17px; }
+.card p { margin: 0; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; word-break: break-all; }
+
+/* browse: fabrics | places | the selected place */
+.browse { flex: 1; display: grid; grid-template-columns: 190px 320px minmax(0, 1fr); min-height: 0; }
+.col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+.col.view { border-right: none; }
+.col-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); min-height: 42px; }
+.list, .tree { list-style: none; margin: 0; padding: 4px; overflow: auto; flex: 1; }
+.list button, .tree button {
+  width: 100%; text-align: left; border: none; background: none; border-radius: 6px; padding: 4px 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+}
+.list button:hover, .tree button:hover { background: var(--soft); }
+.list button.on, .tree button.on { background: var(--acc-soft); }
+.list .when { color: var(--muted); font-size: 11.5px; display: block; }
+.places input { margin: 8px 8px 0; }
+.tree button { display: flex; align-items: baseline; gap: 6px; }
+.tree .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tree .kind { color: var(--muted); font-size: 11.5px; flex: none; }
+.tree .count { color: var(--muted); font-size: 11.5px; margin-left: auto; flex: none; }
+.address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg { display: flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.seg button.on { background: var(--acc-soft); border-color: var(--accent); }
+.section, .doc { flex: 1; overflow: auto; margin: 0; padding: 12px 16px; white-space: pre-wrap; word-wrap: break-word; }
+.section .head { font-weight: 600; margin-bottom: 8px; }
+.section .jump { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+.toast {
+  position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 9;
+  background: var(--fg); color: var(--bg); padding: 7px 14px; border-radius: var(--radius); max-width: 80%;
+}
+.toast.bad { background: var(--red); color: #fff; }
+
+@media (max-width: 760px) {
+  .browse { grid-template-columns: 1fr; grid-auto-rows: minmax(160px, auto); overflow: auto; }
+  .col { border-right: none; border-bottom: 1px solid var(--line); }
+}

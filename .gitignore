@@ -1,2 +1,5 @@
 .gitx/*
 !.gitx/commits/
+node_modules/
+plugin/runtime.json
+plugin/local.json

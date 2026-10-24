@@ -1,0 +1,11 @@
+{
+  "id": "notex",
+  "name": "NoteX",
+  "hostApi": "1",
+  "view": "plugin.html",
+  "sidebar": {
+    "label": "NoteX",
+    "hint": "File Fabric as places"
+  },
+  "needs": ["node"]
+}
