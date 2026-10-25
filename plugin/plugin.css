@@ -91,6 +91,12 @@ main { flex: 1; min-height: 0; display: flex; }
 .places input { margin: 8px 8px 0; }
 .places .col-head button { padding: 3px 9px; font-size: 12.5px; }
 .reading-line { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+/* Keep in RAGX: a switch, lit while the canvas is kept in sync. */
+button.switch { margin-right: 6px; }
+button.switch::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }
+button.switch[aria-checked="true"] { background: var(--acc-soft); border-color: var(--accent); }
+button.switch[aria-checked="true"]::before { background: var(--accent); }
+.list .kept { color: var(--accent); }
 .tree button { display: flex; align-items: baseline; gap: 6px; }
 .tree .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tree .kind { color: var(--muted); font-size: 11.5px; flex: none; }

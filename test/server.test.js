@@ -98,6 +98,24 @@ test('Read images runs in the background and the next build carries the readings
   } finally { ragx.close(); }
 });
 
+// After the test above, RAGX is its stand-in, now closed - never the RAGX on this machine.
+test('Keep in RAGX is switched per canvas, kept in config.json and reported', async () => {
+  assert.equal((await call('PUT', '/api/fabrics/Thesis/sync', { body: { on: 'yes' } })).status, 400);
+  assert.equal((await call('PUT', '/api/fabrics/Missing/sync', { body: { on: true } })).status, 404);
+  const on = await (await call('PUT', '/api/fabrics/Thesis/sync', { body: { on: true } })).json();
+  assert.equal(on.on, true);
+  assert.ok(on.sync);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).sync), ['Thesis']);
+  await s.sync.running;
+  const st = await (await call('GET', '/api/state')).json();
+  assert.equal(st.sync.Thesis.status, 'waiting-ragx');
+  const list = await (await call('GET', '/api/fabrics')).json();
+  assert.equal(list.fabrics.find((f) => f.name === 'Thesis').sync.status, 'waiting-ragx');
+  assert.equal(list.fabrics.find((f) => f.name === 'Board').sync, null);
+  await call('PUT', '/api/fabrics/Thesis/sync', { body: { on: false } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).sync, {});
+});
+
 test('a fabric name cannot climb out of the workspace', async () => {
   // URL parsing folds an encoded ".." away before the route sees it.
   assert.equal(await raw('/api/fabrics/%2E%2E'), 404);

@@ -98,6 +98,7 @@ async function refresh() {
   setStatus('up', `Engine running · ${st.fabrics} fabric${st.fabrics === 1 ? '' : 's'}`);
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
+  else if (S.built) renderSync((st.sync && st.sync[S.fabric]) || null); // a save in File Fabric starts a sync
   if (!was && st.reading && !st.reading.finished) followReading();
 }
 
@@ -131,7 +132,9 @@ async function loadFabrics() {
     const b = el('button', null);
     // Where Read images still has work: "29 images to read".
     const imgs = !f.images ? '' : f.unread ? ` · ${f.unread} image${f.unread === 1 ? '' : 's'} to read` : ` · ${f.images} image${f.images === 1 ? '' : 's'} read`;
-    b.append(el('span', null, f.name), el('span', f.unread ? 'when todo' : 'when', `saved ${f.modified.slice(0, 10)}${imgs}`));
+    const when = el('span', f.unread ? 'when todo' : 'when', `saved ${f.modified.slice(0, 10)}${imgs}`);
+    if (f.sync) when.append(el('span', 'kept', ' · kept in RAGX'));
+    b.append(el('span', null, f.name), when);
     b.dataset.name = f.name;
     b.addEventListener('click', () => openFabric(f.name));
     const li = el('li', null);
@@ -183,6 +186,7 @@ async function openFabric(name) {
   $('read-btn').disabled = !unread || busy;
   $('read-btn').title = busy ? `Reading the images of ${S.state.reading.fabric} - one canvas at a time`
     : !n ? 'This canvas has no images to read' : !unread ? 'Every image on this canvas is read' : `Have RAGX read ${unread} image${unread === 1 ? '' : 's'} with Haiku, four at a time`;
+  renderSync(S.built.sync);
   // A finished job's line is about its own canvas, not this one.
   const job = S.state && S.state.reading;
   if (job && job.finished && job.fabric !== name) $('reading').hidden = true;
@@ -288,6 +292,61 @@ async function followReading() {
   loadFabrics(); // the list's "to read" counts change; it opens the selected canvas again
 }
 
+/* ------------------------------------------------------------ auto-sync */
+
+const SYNC_WORD = {
+  settling: 'waiting for File Fabric to finish saving', waiting: 'synced less than a minute ago - the next sync waits its turn',
+  queued: 'waiting for Read images to finish', building: 'building the document', reading: 'reading new images',
+  sending: 'sending to RAGX', 'waiting-ragx': "waiting for RAGX's engine", missing: 'its fabric.json is gone', error: 'could not sync',
+};
+
+function ago(iso) {
+  const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86_400 ? `${Math.round(s / 3600)} h ago` : iso.slice(0, 10);
+}
+
+/* The open canvas's switch and line: whether it is kept in RAGX, and where its sync is. */
+function renderSync(sync) {
+  const on = Boolean(sync);
+  const btn = $('sync-btn');
+  btn.setAttribute('aria-checked', String(on));
+  btn.title = on ? 'Kept in RAGX: synced 15 s after each save. Press to stop.' : 'Keep this canvas in RAGX: synced now and after each save';
+  const line = $('sync-line');
+  line.hidden = !on;
+  if (!on) return;
+  const word = sync.status === 'synced'
+    ? (sync.at ? `In RAGX - synced ${ago(sync.at)}` : 'In RAGX') + (sync.detail ? ` (${sync.detail})` : '')
+    : `Auto-sync: ${SYNC_WORD[sync.status] || sync.status}${sync.detail ? ` - ${sync.detail}` : ''}`;
+  line.textContent = word;
+  line.classList.toggle('bad', sync.status === 'error' || sync.status === 'missing');
+  // While a sync is under way, follow it; a settled canvas is looked at with the rest.
+  clearTimeout(renderSync.timer);
+  if (sync.status !== 'synced' && sync.status !== 'error') renderSync.timer = setTimeout(followSync, 2500);
+}
+
+async function followSync() {
+  let st;
+  try { st = await engine.state(); } catch (_) { st = null; }
+  if (!st || !S.fabric) return;
+  S.state = st;
+  const now = st.sync && st.sync[S.fabric];
+  const was = $('sync-line').textContent;
+  renderSync(now || null);
+  // Synced: its document changed, so it is built again for the page.
+  if (now && now.status === 'synced' && was && !was.startsWith('In RAGX')) loadFabrics();
+}
+
+async function toggleSync() {
+  if (!S.fabric) return;
+  const on = $('sync-btn').getAttribute('aria-checked') !== 'true';
+  try {
+    const r = await engine.setSync(S.fabric, on);
+    renderSync(r.sync);
+    toast(on ? `${S.fabric} is kept in RAGX - synced now and 15 s after each save.` : `${S.fabric} is no longer synced; what RAGX has stays.`);
+    loadFabrics();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function setRagxFolder() {
   $('menu').hidden = true;
   const now = S.state && S.state.ragx;
@@ -324,6 +383,7 @@ $('ws-form').addEventListener('submit', async (e) => {
 $('ws-change').addEventListener('click', () => { $('ws-path').value = S.state.workspace || ''; show('workspace'); });
 $('reload').addEventListener('click', loadFabrics);
 $('read-btn').addEventListener('click', readImages);
+$('sync-btn').addEventListener('click', toggleSync);
 $('ragx-btn').addEventListener('click', setRagxFolder);
 $('filter').addEventListener('input', () => S.built && renderTree());
 $('show-place').addEventListener('click', () => showView('place'));

@@ -12,7 +12,8 @@
  * <data>/config.json keeps the workspace folder and RAGX's plugin folder;
  * <data>/docs/ keeps the last address document and place map built for each
  * fabric; <data>/readings.json and <data>/images/ keep what Read images
- * found and the images that had no file of their own.
+ * found and the images that had no file of their own; config.json also
+ * keeps which canvases auto-sync keeps in RAGX (t-0c1da1346d).
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -26,6 +27,7 @@ import { writeRuntime, writeLocal } from './lifecycle.js';
 import { fabricImages, Readings } from './images.js';
 import { readFabricImages } from './read.js';
 import { ragxFolder, RagxError } from './ragx.js';
+import { AutoSync } from './sync.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -83,6 +85,7 @@ export function buildFabric(dir, { dataDir = null } = {}) {
 
 export async function startServer({
   dataDir, port = DEFAULT_PORT, origins = DEFAULT_ORIGINS, runtimeFile = DEFAULT_RUNTIME, log = console.log, signals = true, onStopped = null, ragx = null,
+  syncOptions = {},
 } = {}) {
   const dir = path.resolve(dataDir);
   fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
@@ -101,7 +104,16 @@ export async function startServer({
     return config.workspace;
   };
 
+  // The last build is kept, so what NoteX made can be read outside the page - and by RAGX.
+  const buildAndKeep = (name) => {
+    const built = buildFabric(fabricDir(needWorkspace(), name), { dataDir: dir });
+    fs.writeFileSync(path.join(dir, 'docs', `${name}.notex.md`), built.markdown);
+    fs.writeFileSync(path.join(dir, 'docs', `${name}.places.json`), JSON.stringify(built.map, null, 2));
+    return built;
+  };
+
   let reading = null; // the Read images job, while it runs and once it is done
+  const sync = new AutoSync({ config, saveConfig, dataDir: dir, build: buildAndKeep, busy: () => Boolean(reading && !reading.finished), log, ...syncOptions });
   let stopping = false;
   let actualPort = port;
   const token = crypto.randomBytes(24).toString('base64url');
@@ -120,7 +132,7 @@ export async function startServer({
     let p;
 
     if (m('GET', /^\/api\/state$/)) {
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, ...workspaceState() });
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), ...workspaceState() });
     }
     if (m('PUT', /^\/api\/ragx$/)) {
       const body = await readJson(req);
@@ -136,6 +148,7 @@ export async function startServer({
       const name = decodeURIComponent(p[0]);
       const fdir = fabricDir(needWorkspace(), name);
       if (reading && !reading.finished) throw new HttpError(409, 'busy', `Already reading the images of ${reading.fabric}.`);
+      if (sync.running) throw new HttpError(409, 'busy', 'Auto-sync is bringing a canvas up to date - try again when it is done.');
       reading = { fabric: name, done: 0, total: null, failed: 0, finished: false, result: null };
       const job = reading;
       readFabricImages(fdir, { dataDir: dir, ragx: config.ragx, onProgress: (pr) => Object.assign(job, pr) })
@@ -147,6 +160,8 @@ export async function startServer({
       const ws = typeof body.path === 'string' ? body.path.trim().replace(/^"(.*)"$/, '$1') : '';
       if (!ws || !path.isAbsolute(ws)) throw new HttpError(400, 'bad-path', 'Give the workspace as a full path, e.g. E:\\FILES\\my workspace.');
       const fabrics = listFabrics(ws);
+      // Canvases switched on belong to the workspace they were switched on in.
+      if (config.workspace && path.resolve(ws) !== config.workspace) delete config.sync;
       config.workspace = path.resolve(ws);
       saveConfig();
       return json(200, { workspace: config.workspace, fabrics: fabrics.length });
@@ -155,20 +170,27 @@ export async function startServer({
      * so the page can say where Read images still has work (about 0.1 s a
      * fabric; a fabric that cannot be read is listed without counts). */
     if (m('GET', /^\/api\/fabrics$/)) {
+      const synced = sync.report();
       const fabrics = listFabrics(needWorkspace()).map(({ name, dir: fdir, modified, size }) => {
         let counts = { images: null, unread: null };
         try { const b = buildFabric(fdir, { dataDir: dir }); counts = { images: b.images, unread: b.unread }; } catch (_) { /* shown without counts */ }
-        return { name, modified, size, ...counts };
+        return { name, modified, size, ...counts, sync: synced[name] || null };
       });
       return json(200, { workspace: needWorkspace(), fabrics });
     }
     if ((p = m('GET', /^\/api\/fabrics\/([^/]+)$/))) {
       const name = decodeURIComponent(p[0]);
-      const built = buildFabric(fabricDir(needWorkspace(), name), { dataDir: dir });
-      // The last build is kept, so what NoteX made can be read outside the page.
-      fs.writeFileSync(path.join(dir, 'docs', `${name}.notex.md`), built.markdown);
-      fs.writeFileSync(path.join(dir, 'docs', `${name}.places.json`), JSON.stringify(built.map, null, 2));
-      return json(200, { name, ...built });
+      return json(200, { name, ...buildAndKeep(name), sync: sync.report()[name] || null });
+    }
+    /* Keep in RAGX: switched on, the canvas is synced now and after each save. */
+    if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/sync$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
+      if (on && !fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No fabric ${name} in the workspace.`);
+      sync.set(name, on);
+      return json(200, { name, on, sync: sync.report()[name] || null });
     }
     if (m('POST', /^\/api\/shutdown$/)) {
       json(202, { stopping: true });
@@ -217,6 +239,7 @@ export async function startServer({
   const url = `http://127.0.0.1:${actualPort}`;
   const removeRuntime = writeRuntime(runtimeFile, { url, port: actualPort, token, pid: process.pid, dataDir: dir, version: VERSION, startedAt: new Date().toISOString() });
   writeLocal(path.join(path.dirname(runtimeFile), 'local.json'));
+  sync.start();
 
   let stopped = null;
   function stop(reason = 'stopped') {
@@ -224,6 +247,7 @@ export async function startServer({
     stopping = true;
     stopped = (async () => {
       log(`Stopping (${reason})...`);
+      await sync.stop();
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();
       removeRuntime();
@@ -237,5 +261,5 @@ export async function startServer({
     for (const s of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(s, onSignal);
   }
 
-  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, config: () => ({ ...config }) };
+  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, sync, config: () => ({ ...config }) };
 }
