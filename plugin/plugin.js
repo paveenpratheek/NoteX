@@ -185,7 +185,7 @@ async function openFabric(name) {
   const busy = Boolean(S.state && S.state.reading && !S.state.reading.finished);
   $('read-btn').disabled = !unread || busy;
   $('read-btn').title = busy ? `Reading the images of ${S.state.reading.fabric} - one canvas at a time`
-    : !n ? 'This canvas has no images to read' : !unread ? 'Every image on this canvas is read' : `Have RAGX read ${unread} image${unread === 1 ? '' : 's'} with Haiku, four at a time`;
+    : !n ? 'This canvas has no images to read' : !unread ? 'Every image on this canvas is read' : `Have RAGX read ${unread} image${unread === 1 ? '' : 's'} with Haiku, two at a time`;
   renderSync(S.built.sync);
   // A finished job's line is about its own canvas, not this one.
   const job = S.state && S.state.reading;
@@ -262,7 +262,7 @@ function showView(v) {
 
 /* ------------------------------------------------------- Read images */
 
-/* RAGX reads the images with Haiku, four at a time (t-6b38e0dc27); the page
+/* RAGX reads the images with Haiku, two at a time (t-6b38e0dc27); the page
  * follows the job through /api/state and rebuilds the fabric when it ends. */
 async function readImages() {
   if (!S.fabric) return;

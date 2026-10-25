@@ -1,5 +1,5 @@
 /* A fabric's images: found as files (sources/, or saved from a data URL),
- * read by RAGX four at a time and once each, and written under their
+ * read by RAGX two at a time and once each, and written under their
  * place as reading, link and path (t-a4bf938570, t-6b38e0dc27, t-a8841a0bee). */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,11 +40,12 @@ function workspace(t) {
 
 /* A stand-in for RAGX's read route: counts what it is asked, and how many at once. */
 async function fakeRagx(t, { fail = null } = {}) {
-  const seen = { calls: 0, now: 0, most: 0, names: [] };
+  const seen = { calls: 0, now: 0, most: 0, names: [], ahead: [] };
   const server = http.createServer(async (req, res) => {
     if (req.headers['x-rag-token'] !== 'tok') { res.writeHead(401); return res.end(); }
     seen.calls++; seen.now++; seen.most = Math.max(seen.most, seen.now);
     seen.names.push(decodeURIComponent(req.headers['x-file-name']));
+    seen.ahead.push(Number(req.headers['x-read-ahead']));
     for await (const _ of req);
     await new Promise((r) => setTimeout(r, 40));
     seen.now--;
@@ -73,13 +74,14 @@ test('images are files: from sources/, or saved once from their data URL', (t) =
   assert.match(md, /^- talk \(YouTube video, https:\/\/youtu\.be\/x\)$/m);
 });
 
-test('Read images asks RAGX once per picture, at most four at a time, and the document carries the readings', async (t) => {
+test('Read images asks RAGX once per picture, at most two at a time, saying how many are still to come', async (t) => {
   const { dir, data } = workspace(t);
   const { runtime, seen } = await fakeRagx(t);
   const r = await readFabricImages(dir, { dataDir: data, runtime });
   assert.deepEqual({ images: r.images, toRead: r.toRead, read: r.read, failed: r.failed, stopped: r.stopped }, { images: 3, toRead: 2, read: 2, failed: [], stopped: null });
   assert.equal(seen.calls, 2);
-  assert.ok(seen.most <= 4);
+  assert.ok(seen.most <= 2);
+  assert.deepEqual(seen.ahead.sort(), [0, 1], 'the first says one more is coming, so RAGX warms a reader for it');
   const again = await readFabricImages(dir, { dataDir: data, runtime });
   assert.equal(again.toRead, 0);
   assert.equal(seen.calls, 2);

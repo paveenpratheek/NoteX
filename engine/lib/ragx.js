@@ -23,12 +23,12 @@ export function ragxRuntime(folder) {
   }
 }
 
-export async function readImage(rt, buf, name) {
+export async function readImage(rt, buf, name, { ahead = 0 } = {}) {
   let res;
   try {
     res = await fetch(rt.url + '/api/read-image', {
       method: 'POST',
-      headers: { 'x-rag-token': rt.token, 'x-rag-client': 'notex', 'x-file-name': encodeURIComponent(name), 'content-type': 'application/octet-stream' },
+      headers: { 'x-rag-token': rt.token, 'x-rag-client': 'notex', 'x-file-name': encodeURIComponent(name), 'x-read-ahead': String(ahead), 'content-type': 'application/octet-stream' },
       body: buf,
     });
   } catch (_) {

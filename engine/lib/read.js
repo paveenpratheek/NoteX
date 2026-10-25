@@ -2,14 +2,16 @@
  * step of its own, pressed by the user, so opening a fabric never waits on
  * readings and building works with RAGX stopped (t-6b38e0dc27). Each image
  * is asked about once - by its sha256, however many times it is placed -
- * and four go at a time, as many as RAGX reads at once. */
+ * and two go at a time, as many as RAGX reads at once. Each says how many
+ * are still to come, so RAGX starts a spare reader for the next while one
+ * is read (RAGX's t-df9b7a8cf6). */
 import fs from 'node:fs';
 import { readFabric } from './fabric.js';
 import { buildPlaces } from './places.js';
 import { fabricImages, Readings } from './images.js';
 import { ragxFolder, ragxRuntime, readImage } from './ragx.js';
 
-export const READ_AT_ONCE = 4;
+export const READ_AT_ONCE = 2;
 
 export async function readFabricImages(dir, { dataDir, ragx = null, atOnce = READ_AT_ONCE, onProgress = () => {}, runtime = null } = {}) {
   const fabric = readFabric(dir);
@@ -35,7 +37,7 @@ export async function readFabricImages(dir, { dataDir, ragx = null, atOnce = REA
       const name = im.file.name || 'image';
       try {
         const buf = im.path ? fs.readFileSync(im.path) : im.buf;
-        readings.put(im.sha, await readImage(rt, buf, name));
+        readings.put(im.sha, await readImage(rt, buf, name, { ahead: todo.length - next }));
         result.read++;
       } catch (e) {
         // RAGX gone or out of Claude: the rest would fail the same way, so stop asking.
