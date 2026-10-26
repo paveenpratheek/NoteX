@@ -62,6 +62,13 @@ export function fingerprint(item) {
   return crypto.createHash('sha1').update(JSON.stringify(pick)).digest('hex').slice(0, 16);
 }
 
+// What an <Edit>/<Remove> script does, in a few words for the queue and the page.
+const changesOf = (nodes) => {
+  const n = (tag) => nodes.filter((x) => x.tag === tag).length;
+  const say = (k, w) => (k ? `${k} ${w}${k === 1 ? '' : 's'}` : null);
+  return [say(n('Edit'), 'edit'), say(n('Remove'), 'removal')].filter(Boolean).join(' and ');
+};
+
 const EMPTY_CANVAS = () => ({ drawings: [], areas: [], files: [], links: [], totems: [], tables: [] });
 
 export class Writer {
@@ -149,7 +156,7 @@ export class Writer {
     }
     const entry = {
       id: crypto.randomBytes(5).toString('hex'), canvas: parsed.canvas, owner: who, kind: parsed.kind,
-      what: parsed.kind === 'totem' ? `new totem ${parsed.totem.attrs.name}` : parsed.kind === 'add' ? `add to ${parsed.at}` : `${parsed.edits.length} edit${parsed.edits.length === 1 ? '' : 's'}`,
+      what: parsed.kind === 'totem' ? `new totem ${parsed.totem.attrs.name}` : parsed.kind === 'add' ? `add to ${parsed.at}` : changesOf(parsed.edits),
       script, at: new Date(this.now()).toISOString(), status: 'waiting', result: null,
     };
     this.data.entries.push(entry);
@@ -263,8 +270,12 @@ export class Writer {
     fs.renameSync(tmp, file);
 
     // Read back as RAGX will: every promised address there, every text in its place.
-    const model = buildPlaces(readFabric(dir));
+    const back = readFabric(dir);
+    const model = buildPlaces(back);
     const missing = [];
+    // And everything a <Remove> took off is gone (t-1ca15af044).
+    const left = new Set(['areas', 'drawings', 'files', 'totems', 'links'].flatMap((k) => (back.state[k] || []).map((x) => x.id)));
+    for (const id of out.removed || []) if (left.has(id)) missing.push(`the removal of ${id}`);
     for (const b of out.boxes || []) if (model.places.get(b.id)?.address !== b.address) missing.push(b.address);
     const byAddress = new Map([...model.places.values()].map((p) => [p.address, p]));
     for (const t of out.texts || []) if (!(byAddress.get(t.address)?.texts || []).includes(plainText(textHtml(t.text)))) missing.push(`the text "${t.text.slice(0, 40)}" in ${t.address}`);
@@ -280,6 +291,7 @@ export class Writer {
       if (!changed.has(item.id)) continue;
       ledger.items[item.id] = { print: fingerprint(item), totem: out.totemId || ledger.items[item.id]?.totem || null, owner: owner || ledger.items[item.id]?.owner || null };
     }
+    for (const id of out.removed || []) delete ledger.items[id];
     this.saveLedger(canvas, ledger);
     this.data.upkeep[canvas] = fs.statSync(file).mtimeMs;
 
@@ -287,7 +299,7 @@ export class Writer {
     return {
       written: out.written,
       report: {
-        boxes, written: out.written.length, moved: [...out.touched].filter((id) => !out.written.includes(id)).length,
+        boxes, written: out.written.length, removed: (out.removed || []).length, moved: [...out.touched].filter((id) => !out.written.includes(id)).length,
         check: out.check || null, copies: (out.copies || []).map((c) => c.name), backup,
       },
     };

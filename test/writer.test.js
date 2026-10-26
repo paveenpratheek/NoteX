@@ -206,3 +206,27 @@ test('the rules canvas is never written by an agent', async (t) => {
   assert.match(e.result.message, /Thesis is the rules canvas, which holds only the user's own words/);
   assert.equal(read(dir).totems.length, 2);
 });
+
+test('Remove through the writer: gone from the canvas and the ledger; refused once the user edited it', async (t) => {
+  const { dir, writer, root } = setup(t);
+  await writer.submit({ script: EXAMPLE, owner: 'agent-a' });
+  const ledgerOf = () => JSON.parse(fs.readFileSync(path.join(root, 'data', 'scripts', 'ledger-Thesis.json'), 'utf8')).items;
+  const lines = read(dir).drawings.filter((d) => d.type === 'line' && d.writtenBy === 'agent');
+  assert.equal(lines.length, 3);
+  const e = await writer.submit({ script: `<Canvas name="Thesis">${lines.map((l) => `<Remove id="${l.id}"/>`).join('')}</Canvas>`, owner: 'agent-a' });
+  assert.equal(e.status, 'written', JSON.stringify(e.result));
+  assert.equal(e.what, '3 removals');
+  assert.equal(e.result.removed, 3);
+  assert.equal(read(dir).drawings.filter((d) => d.type === 'line' && d.writtenBy === 'agent').length, 0);
+  for (const l of lines) assert.equal(ledgerOf()[l.id], undefined);
+  // The user ticks a checklist item in File Fabric: that note, and the box around it, stay.
+  const state = read(dir);
+  const note = state.areas.find((a) => a.name === 'Read todo');
+  note.textContent = '- [x] skim ten';
+  save(dir, state);
+  const box = state.areas.find((a) => a.name === 'Read');
+  const r = await writer.submit({ script: `<Canvas name="Thesis"><Remove id="${box.id}"/></Canvas>`, owner: 'agent-a' });
+  assert.equal(r.status, 'refused');
+  assert.match(r.result.message, /would take "Pipeline \(totem\) > Read > Read todo \(note\)" with it, which was edited by the user since it was written/);
+  assert.ok(read(dir).areas.some((a) => a.id === box.id));
+});

@@ -34,17 +34,20 @@ const FORMAT = [
   '      <Area name="Collect"><Note name="Todo">- [ ] find papers\n- [x] read the survey</Note></Area>',
   '      <Area name="Read"><File path="C:\\papers\\survey.pdf"/></Area>',
   '    </Row>',
-  '    <Line from="Collect" to="Read"/>',
+  '    <Link from="Collect" to="Read"/>',
   '  </Totem>',
   '</Canvas>',
   'or new contents for a place already in your own totem, by its address as notex_read shows it:',
   '<Add canvas="Thesis" at="Reading plan (totem) > Collect"><Note name="More">- [ ] one</Note></Add>',
-  'or changes to items you wrote, by the ids notex_read shows:',
-  '<Canvas name="Thesis"><Edit id="1793...">new words</Edit><Edit id="1794..." name="New name"/></Canvas>',
+  'or changes to items you wrote, by the ids notex_read shows - new words, a new name, or taking one off the canvas:',
+  '<Canvas name="Thesis"><Edit id="1793...">new words</Edit><Edit id="1794..." name="New name"/><Remove id="1795..."/></Canvas>',
+  '<Remove id> takes off only what you wrote: a box or totem goes with everything inside it and the wires joining it, and nothing is removed if any of that is the user\'s or was edited by the user.',
   'Tags: <Totem name>, <Area name> (a box), <Note name> (a note; a checklist is "- [ ] item" lines), <Text size?> (words; size 10-72 px, default 18),',
   '<File path> (a full path on this machine, copied onto the canvas, or a file name already on it), <ScrollBox name> holding <Page>s,',
-  '<Row> (side by side, tops aligned), <Column> (stacked, inside a Row), <Line from to> (a drawn line) and <Link from to> (a corner link) joining two boxes by name -',
-  'by a path such as "Collect > Todo" when two share a name, or in an <Add> by a full address.',
+  '<Row> (side by side, tops aligned), <Column> (stacked, inside a Row).',
+  'To connect two boxes, use <Link from to>: File Fabric\'s link between the boxes\' corner dots (such as bottom-left to top-left), which is what a connection is on a canvas.',
+  '<Line from to> only draws a line between two boxes with File Fabric\'s Line tool - a drawing, not a connection; use it only when the user asks for a drawn line.',
+  'Both name their boxes by name, by a path such as "Collect > Todo" when two share a name, or in an <Add> by a full address.',
   'Children stack top to bottom. Give no sizes or positions: NoteX lays everything out, in free space far from the other totems.',
   'Write < as &lt; and & as &amp; in text, or wrap text in <![CDATA[ ... ]]>. Two boxes side by side need different names.',
 ].join('\n');
@@ -52,7 +55,7 @@ const FORMAT = [
 const INSTRUCTIONS = [
   "NoteX connects File Fabric - the user's spatial canvas of totems, areas, notes, text and files - to agents.",
   'Use notex_read to see a canvas as a totem script: every place with its address, every item with its id, every totem with its owner.',
-  'Use notex_write only when the user asks you to put something on a canvas. Write one totem per script; a later script can <Add> to it or <Edit> what you wrote.',
+  'Use notex_write only when the user asks you to put something on a canvas. Write one totem per script; a later script can <Add> to it, <Edit> what you wrote or <Remove> it. Connect boxes with <Link>; <Line> only draws a line.',
   'You may change only your own totem. The user\'s totems, anything the user added to yours, and anything the user edited are refused - they are the user\'s.',
   "Never write on the rules canvas: it holds only the user's own words, and NoteX refuses scripts for it.",
   'When File Fabric has the canvas open, a script waits and NoteX writes it once File Fabric lets go; notex_canvases shows what is waiting and what happened.',
@@ -127,6 +130,7 @@ function told(entry) {
     const boxes = r.boxes || [];
     const lines = [`Written on ${entry.canvas} as ${entry.owner}: ${entry.what}, ${plural(r.written, 'item')}.${boxes.length ? ' The places it made:' : ''}`];
     for (const b of boxes) lines.push(`- ${b.address}  (id ${b.id})`);
+    if (r.removed) lines.push(`${plural(r.removed, 'item')} removed, with the wires that joined them.`);
     if (r.moved) lines.push(`${plural(r.moved, 'item')} of yours moved or grown to make room.`);
     if (r.copies && r.copies.length) lines.push(`Copied onto the canvas: ${r.copies.join(', ')}.`);
     lines.push(`Overlap check: nothing it wrote overlaps anything${r.check && r.check.already ? ` (the canvas already had ${plural(r.check.already, 'overlap')} of the user's own, left as they are)` : ''}.`);

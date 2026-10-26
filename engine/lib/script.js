@@ -14,6 +14,7 @@
  *
  *   <Add canvas="Thesis" at="Reading plan (totem) > Collect"> ... </Add>
  *   <Canvas name="Thesis"><Edit id="1793...">new words</Edit></Canvas>
+ *   <Canvas name="Thesis"><Remove id="1794..."/></Canvas>
  *
  * The two top-level forms are t-592a3e72ba. Parsing is by hand, with no
  * dependencies, and every refusal names its line and column: a script that
@@ -39,6 +40,8 @@ const TAGS = {
   Canvas: { attrs: { name: true }, holds: 'tags' },
   Add: { attrs: { canvas: true, at: true }, holds: 'tags' },
   Edit: { attrs: { id: true, name: false }, holds: 'text' },
+  // Takes an agent's own item off the canvas, with what is inside it (t-1ca15af044, t-5d426facf3).
+  Remove: { attrs: { id: true }, holds: 'nothing' },
   Totem: { attrs: { name: true }, holds: 'tags' },
   Area: { attrs: { name: true }, holds: 'tags' },
   Note: { attrs: { name: true }, holds: 'text' },
@@ -57,7 +60,7 @@ const CONTENT = ['Area', 'Note', 'Text', 'File', 'Row', 'Column', 'ScrollBox'];
 const WIRES = ['Line', 'Link'];
 const INSIDE = {
   '': ['Canvas', 'Add'],
-  Canvas: ['Totem', 'Edit'],
+  Canvas: ['Totem', 'Edit', 'Remove'],
   Add: [...CONTENT, ...WIRES],
   Totem: [...CONTENT, ...WIRES],
   Area: [...CONTENT, ...WIRES],
@@ -203,7 +206,7 @@ function build(tokens) {
     const attrs = {};
     for (const a of t.attrs) {
       const name = a.name.toLowerCase();
-      if ((name === 'id' && tag !== 'Edit') || name === 'owner') {
+      if ((name === 'id' && tag !== 'Edit' && tag !== 'Remove') || name === 'owner') {
         // A read-out's ids and owners are never written back (t-bb0a5fdf1f).
         throw new ScriptError(`<${tag}> takes no ${name} - ids and owners come from NoteX. To change something already written, use <Edit id="..."> inside <Canvas>.`, t.line, t.col);
       }
@@ -327,10 +330,10 @@ export function parseScript(src) {
   const top = root.children[0];
   if (top.tag === 'Canvas') {
     const totems = top.children.filter((c) => c.tag === 'Totem');
-    const edits = top.children.filter((c) => c.tag === 'Edit');
-    if (!top.children.length) throw new ScriptError('<Canvas> holds nothing - give it one <Totem>, or <Edit> tags.', top.line, top.col);
+    const edits = top.children.filter((c) => c.tag === 'Edit' || c.tag === 'Remove');
+    if (!top.children.length) throw new ScriptError('<Canvas> holds nothing - give it one <Totem>, or <Edit> and <Remove> tags.', top.line, top.col);
     if (totems.length > 1) throw new ScriptError('a script writes one totem - send the next <Totem> as a script of its own.', totems[1].line, totems[1].col);
-    if (totems.length && edits.length) throw new ScriptError('<Edit> and a new <Totem> go in separate scripts.', edits[0].line, edits[0].col);
+    if (totems.length && edits.length) throw new ScriptError(`<${edits[0].tag}> and a new <Totem> go in separate scripts.`, edits[0].line, edits[0].col);
     if (totems.length) {
       const boxes = collectBoxes(totems[0]);
       checkWires(totems[0], boxes, { allowOutside: false });
@@ -338,9 +341,9 @@ export function parseScript(src) {
     }
     const seen = new Map();
     for (const e of edits) {
-      if (seen.has(e.attrs.id)) throw new ScriptError(`id ${e.attrs.id} is edited twice (also on line ${seen.get(e.attrs.id).line}).`, e.line, e.col);
+      if (seen.has(e.attrs.id)) throw new ScriptError(`id ${e.attrs.id} is named twice (also on line ${seen.get(e.attrs.id).line}).`, e.line, e.col);
       seen.set(e.attrs.id, e);
-      if (!e.text && e.attrs.name === undefined) throw new ScriptError('<Edit> changes nothing - give it new text, or name="..." to rename.', e.line, e.col);
+      if (e.tag === 'Edit' && !e.text && e.attrs.name === undefined) throw new ScriptError('<Edit> changes nothing - give it new text, or name="..." to rename.', e.line, e.col);
     }
     return { kind: 'edit', canvas: top.attrs.name, edits };
   }

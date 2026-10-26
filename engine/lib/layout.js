@@ -477,7 +477,7 @@ const withDefaults = (opts = {}) => ({
   newId: opts.newId || newIds(),
 });
 
-const output = () => ({ written: [], touched: new Set(), boxes: [], texts: [], copies: [], wires: [], totemId: null });
+const output = () => ({ written: [], touched: new Set(), removed: [], boxes: [], texts: [], copies: [], wires: [], totemId: null });
 
 /* The canvas before and after, through the overlap check: the layout's own
  * items - new, moved or grown - must be in no overlap the canvas did not
@@ -620,6 +620,44 @@ function redrawLines(scene, out) {
   }
 }
 
+/* <Remove id>: an agent's own item off the canvas - a box or totem with
+ * everything inside it, and every wire joining what goes. Refused whole if
+ * any of it is the user's, edited by the user since it was written, or
+ * another agent's (t-1ca15af044). Boxes left behind keep their size, and a
+ * file's copy stays in sources/ (t-5d426facf3). */
+function removeItem(state, node, parsed, opts, out) {
+  const scene = new Scene(state);
+  const id = node.attrs.id;
+  const e = scene.byId.get(id);
+  const link = e ? null : state.links.find((l) => l.id === id);
+  if (!e && !link) throw new Refusal(`nothing on ${parsed.canvas} has the id ${id} - notex_read shows the ids.`, node);
+  const address = (areaId) => scene.model.places.get(areaId)?.address || areaId;
+  const say = (item) => (state.links.includes(item) ? `the link from "${address(item.fromAreaId)}" to "${address(item.toAreaId)}"` : describe(scene, scene.byId.get(item.id)));
+  const anchor = e || scene.byId.get(link.fromAreaId);
+  const totem = anchor ? scene.totemOf(anchor) : null;
+  if (!totem || totem.writtenBy !== 'agent' || totem.owner !== opts.owner) {
+    throw new Refusal(`${say(e ? e.item : link)} is ${totem && totem.owner ? `in ${totem.owner}'s totem ${totem.name}` : "the user's"} - an agent removes only from its own totem.`, node);
+  }
+  const going = new Set([id]);
+  if (e && e.kind === 'totem') for (const o of scene.items) if (o !== e && scene.totemOf(o)?.id === id) going.add(o.item.id);
+  if (e && e.kind === 'area') for (const o of scene.items) if (scene.chain(o).some((k) => k === id || k.startsWith(`page:${id}:`))) going.add(o.item.id);
+  // The wires joining what goes would be left joining nothing.
+  for (const l of state.links) if (going.has(l.fromAreaId) || going.has(l.toAreaId)) going.add(l.id);
+  for (const d of state.drawings) if (d.type === 'line' && Array.isArray(d.joins) && d.joins.some((j) => going.has(j))) going.add(d.id);
+  const all = [...state.areas, ...state.drawings, ...state.files, ...state.totems, ...state.links];
+  for (const item of all) {
+    if (!going.has(item.id)) continue;
+    const why = opts.mayChange(item, scene.byId.get(item.id)?.kind || 'link');
+    if (why) {
+      const what = say(e ? e.item : link);
+      throw new Refusal(item.id === id ? `${what} ${why} - it is not removed.` : `removing ${what} would take ${say(item)} with it, which ${why}. Nothing was removed.`, node);
+    }
+  }
+  for (const k of ['areas', 'drawings', 'files', 'totems', 'links']) state[k] = state[k].filter((x) => !going.has(x.id));
+  for (const a of state.areas) if (Array.isArray(a.containedFiles)) a.containedFiles = a.containedFiles.filter((f) => !going.has(f));
+  for (const g of going) { out.removed.push(g); out.touched.delete(g); }
+}
+
 /* <Edit id>: new words for a text or note, or a new name for a box or
  * totem - only the agent's own, unedited by the user (t-ab2864c2a1). */
 export function layoutEdits(parsed, state, opts) {
@@ -628,6 +666,7 @@ export function layoutEdits(parsed, state, opts) {
   const before = checkCanvas(state, buildPlaces({ name: 'canvas', state }));
   const out = output();
   for (const node of parsed.edits) {
+    if (node.tag === 'Remove') { removeItem(state, node, parsed, opts, out); continue; }
     const scene = new Scene(state);
     const e = scene.byId.get(node.attrs.id);
     if (!e) throw new Refusal(`nothing on ${parsed.canvas} has the id ${node.attrs.id} - notex_read shows the ids.`, node);

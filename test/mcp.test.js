@@ -68,6 +68,11 @@ test('three tools, the format taught in notex_write, and the rules-canvas rule',
     const write = tools.find((t) => t.name === 'notex_write').description;
     for (const tag of ['<Canvas', '<Totem', '<Add canvas', '<Edit id', '<Area', '<Note', '<Text', '<File path', '<Row>', '<Column>', '<Line', '<Link', '<ScrollBox', '<Page>', '&lt;', 'CDATA']) assert.ok(write.includes(tag), tag);
     assert.match(write, /Never write on the rules canvas/);
+    // Boxes are connected with Link; Line only draws (t-bc73ca3e6f).
+    assert.match(write, /To connect two boxes, use <Link from to>/);
+    assert.match(write, /<Line from to> only draws a line/);
+    assert.ok(write.includes('<Link from="Collect" to="Read"/>'));
+    assert.match(write, /<Remove id=/);
   } finally { m.close(); }
 });
 

@@ -238,3 +238,50 @@ test('the overlap check: crossings, spills and files centred on x, y', () => {
   assert.deepEqual(overlapsOf(found, new Set(['F']), found), []);
   assert.equal(lineBetween({ minX: 0, minY: 0, maxX: 100, maxY: 100 }, { minX: 200, minY: 50, maxX: 300, maxY: 150 }).start.y, 75);
 });
+
+test('Remove takes off an agent\'s own item, with what is inside it and the wires joining it', () => {
+  const state = sampleState();
+  layoutTotem(parseScript(`<Canvas name="Thesis"><Totem name="Plan"><Row><Area name="A"><Note name="Na">- [ ] a</Note></Area><Area name="B"><Text>b</Text></Area><Area name="C"/></Row>
+    <Line from="A" to="B"/><Link from="B" to="C"/></Totem></Canvas>`), state, opts);
+  const id = (name) => state.areas.find((a) => a.name === name).id;
+  const line = state.drawings.find((d) => d.type === 'line' && d.writtenBy === 'agent');
+  const sizes = { A: box(state, 'A'), C: box(state, 'C') };
+  // A Line alone.
+  layoutEdits(parseScript(`<Canvas name="Thesis"><Remove id="${line.id}"/></Canvas>`), state, opts);
+  assert.ok(!state.drawings.includes(line));
+  assert.ok(state.areas.some((a) => a.name === 'B'), 'the boxes it joined stay');
+  // A box: its text and the Link to C go with it; the boxes left keep their size.
+  const out = layoutEdits(parseScript(`<Canvas name="Thesis"><Remove id="${id('B')}"/></Canvas>`), state, opts);
+  assert.equal(out.removed.length, 3);
+  assert.ok(!state.areas.some((a) => a.name === 'B'));
+  assert.ok(!state.drawings.some((d) => d.text === 'b'));
+  assert.equal(state.links.filter((l) => l.writtenBy === 'agent').length, 0);
+  assert.deepEqual([box(state, 'A'), box(state, 'C')], [sizes.A, sizes.C]);
+  assert.equal(state.links.length, 1, "the user's link stays");
+  // The whole totem.
+  const totem = state.totems.find((t) => t.name === 'Plan');
+  layoutEdits(parseScript(`<Canvas name="Thesis"><Remove id="${totem.id}"/></Canvas>`), state, opts);
+  assert.ok(!state.totems.includes(totem));
+  assert.equal([...state.areas, ...state.drawings].filter((x) => x.writtenBy === 'agent').length, 0);
+  assert.deepEqual(model(state).places.get('A1').address, 'RESEARCH (totem) > GAP PAPERS', "the user's canvas is as it was");
+});
+
+test("Remove is refused for the user's items, what the user edited or added, and another agent's", () => {
+  const state = sampleState();
+  const laid = layoutTotem(parseScript('<Canvas name="Thesis"><Totem name="Plan"><Area name="A"><Note name="Na">- [ ] a</Note></Area><Area name="B"/></Totem></Canvas>'), state, opts);
+  const remove = (id, by = opts) => () => layoutEdits(parseScript(`<Canvas name="Thesis"><Remove id="${id}"/></Canvas>`), state, by);
+  const a = state.areas.find((x) => x.name === 'A'), na = state.areas.find((x) => x.name === 'Na'), b = state.areas.find((x) => x.name === 'B');
+  assert.throws(remove('A1'), /is the user's - an agent removes only from its own totem/);
+  assert.throws(remove('L1'), /the link from "HOME \(totem\) > Progress" to "RESEARCH \(totem\) > GAP PAPERS" is the user's/);
+  assert.throws(remove(a.id, { owner: 'agent-b' }), /in agent-a's totem Plan - an agent removes only from its own totem/);
+  // The user ticked the note: the note is kept, and so is the box holding it.
+  const edited = { ...opts, mayChange: (item) => (item.id === na.id ? 'was edited by the user since it was written' : item.writtenBy === 'agent' ? null : "is the user's") };
+  assert.throws(remove(na.id, edited), /"Plan \(totem\) > A > Na \(note\)" was edited by the user since it was written - it is not removed/);
+  assert.throws(remove(a.id, edited), /removing "Plan \(totem\) > A" would take "Plan \(totem\) > A > Na \(note\)" with it, which was edited by the user since it was written\. Nothing was removed/);
+  // The user wrote in the agent's box B.
+  const bb = box(state, 'B');
+  state.drawings.push({ id: 'U1', type: 'text', text: 'mine', x: bb.minX + 39, y: bb.minY + 80, areaId: b.id, linkedTotemId: laid.totemId });
+  assert.throws(remove(b.id), /would take the text "mine" with it, which is the user's/);
+  assert.equal(state.areas.length, sampleState().areas.length + 3, 'nothing was removed');
+  assert.throws(remove('nope'), /nothing on Thesis has the id nope/);
+});

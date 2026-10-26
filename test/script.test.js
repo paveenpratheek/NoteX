@@ -71,7 +71,7 @@ test('tags that do not match are refused at the line and column that broke', () 
   refuses('<Canvas name="X">\n  <Totem name="T"><Box name="A"/></Totem></Canvas>', 2, 19, /<Box> is not a tag NoteX knows/);
   refuses('<Canvas name="X">\n  <Totem name="T" colour="red"></Totem></Canvas>', 2, 3, /takes no attribute "colour". It takes name/);
   refuses('<Canvas name="X"><Totem name="T"><Area></Area></Totem></Canvas>', 1, 34, /<Area> needs name=/);
-  refuses('<Canvas name="X"><Area name="A"></Area></Canvas>', 1, 18, /<Area> cannot go inside <Canvas>. Only <Totem>, <Edit> can go there/);
+  refuses('<Canvas name="X"><Area name="A"></Area></Canvas>', 1, 18, /<Area> cannot go inside <Canvas>. Only <Totem>, <Edit>, <Remove> can go there/);
   refuses('<Canvas name="X"><Totem name="T"><Note name="N">a <b>c</b></Note></Totem></Canvas>', 1, 51, /<b> is not a tag/);
   refuses('<Canvas name="X"><Totem name="T"><Note name="N">a <Area name="B"/></Note></Totem></Canvas>', 1, 51, /cannot go inside <Note>, which holds only text - write &lt;/);
   refuses('<Canvas name="X"><Totem name="T"><Text>1 < 2</Text></Totem></Canvas>', 1, 42, /a "<" that starts no tag - write &lt;/);
@@ -111,4 +111,15 @@ test('dedent and escaping', () => {
   assert.equal(dedent('\n    a\n      b\n\n    c\n  '), 'a\n  b\n\nc');
   assert.equal(escapeText('a < b & c'), 'a &lt; b &amp; c');
   assert.equal(parseScript(`<Canvas name="X"><Totem name="T"><Text>${escapeText('1 < 2 && <b>')}</Text></Totem></Canvas>`).totem.children[0].text, '1 < 2 && <b>');
+});
+
+test('Remove: by id inside <Canvas>, beside Edit, never with a new totem or holding anything', () => {
+  const s = parseScript('<Canvas name="X"><Edit id="1">new</Edit><Remove id="2"/><Remove id="3"></Remove></Canvas>');
+  assert.equal(s.kind, 'edit');
+  assert.deepEqual(s.edits.map((e) => [e.tag, e.attrs.id]), [['Edit', '1'], ['Remove', '2'], ['Remove', '3']]);
+  refuses('<Canvas name="X"><Remove id="2">words</Remove></Canvas>', 1, 33, /directly inside <Remove>/);
+  refuses('<Canvas name="X"><Remove/></Canvas>', 1, 18, /<Remove> needs id=/);
+  refuses('<Canvas name="X"><Totem name="T"/><Remove id="2"/></Canvas>', 1, 35, /<Remove> and a new <Totem> go in separate scripts/);
+  refuses('<Canvas name="X"><Edit id="2">a</Edit><Remove id="2"/></Canvas>', 1, 39, /id 2 is named twice/);
+  refuses('<Add canvas="X" at="T (totem)"><Remove id="2"/></Add>', 1, 32, /<Remove> cannot go inside <Add>/);
 });
