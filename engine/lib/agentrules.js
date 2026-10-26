@@ -78,7 +78,8 @@ export class RulesFile {
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, text);
     fs.renameSync(tmp, this.file);
-    this.state = { ...this.state, tokens: tokensOf(text), at: new Date(this.now()).toISOString(), error: null };
+    // How many places gave rules, so the page can say when the canvas has none yet.
+    this.state = { ...this.state, tokens: tokensOf(text), places: (text.match(/^## /gm) || []).length, at: new Date(this.now()).toISOString(), error: null };
   }
 
   /* The rules canvas's latest save, written out; a save caught half-written

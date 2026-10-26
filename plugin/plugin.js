@@ -366,7 +366,11 @@ function renderRules(rules) {
   if (!on) return;
   line.replaceChildren();
   const size = rules.tokens == null ? '' : ` · about ${rules.tokens.toLocaleString()} tokens${rules.warn ? ` - over ${rules.limit.toLocaleString()}, and read with every agent reply` : ''}`;
-  line.append(`Rules for agents: rules.md${size}${rules.at ? ` · written ${ago(rules.at)}` : ''}${rules.error ? ` - ${rules.error}` : ''}`);
+  // The canvas is the source; rules.md is what NoteX writes from it.
+  const what = !rules.places
+    ? `Nothing written on ${S.fabric} yet - rules.md holds only the two fixed lines. Add text or notes here in File Fabric; they go in after the next save`
+    : `Rules for agents from ${rules.places} place${rules.places === 1 ? '' : 's'} on ${S.fabric}, copied to rules.md${size}${rules.at ? ` · updated ${ago(rules.at)}` : ''}`;
+  line.append(`${what}${rules.error ? ` - ${rules.error}` : ''}`);
   line.classList.toggle('bad', Boolean(rules.warn || rules.error));
   const imp = el('code', 'import', rules.importLine);
   imp.title = 'The line your ~/.claude/CLAUDE.md loads it with';

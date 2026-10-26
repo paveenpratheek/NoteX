@@ -113,3 +113,15 @@ test('a heading the user typed becomes bold, so it cannot cut words off from the
   assert.match(md, /## Everywhere \(totem\) > Criteria\n\n\*\*WORKSPACE\*\*\n\*\*FOR IDEAS\*\*\nKeep ideas short\./);
   assert.ok(!/^# WORKSPACE/m.test(md));
 });
+
+test('the report counts the places that gave rules, none for an empty canvas', (t) => {
+  const { root, ws } = workspace(t);
+  fs.mkdirSync(path.join(ws, 'Blank'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'Blank', 'fabric.json'), JSON.stringify({ areas: [], drawings: [], files: [], totems: [], links: [] }));
+  const config = { workspace: ws };
+  const r = new RulesFile({ config, saveConfig: () => {}, dataDir: root });
+  r.set('Blank', true);
+  assert.equal(r.report().places, 0);
+  r.set('Rules', true);
+  assert.equal(r.report().places, 2);
+});
