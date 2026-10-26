@@ -14,6 +14,9 @@
  * fabric; <data>/readings.json and <data>/images/ keep what Read images
  * found and the images that had no file of their own; config.json also
  * keeps which canvases auto-sync keeps in RAGX (t-0c1da1346d).
+ * <data>/scripts/ keeps the totem scripts agents send, waiting or done, the
+ * ledger of what each wrote and the backups taken before every write
+ * (t-a80b904d43).
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -30,6 +33,7 @@ import { ragxFolder, RagxError } from './ragx.js';
 import { AutoSync } from './sync.js';
 import { canvasFiles } from './files.js';
 import { RulesFile } from './agentrules.js';
+import { Writer } from './writer.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -37,6 +41,7 @@ export const DEFAULT_PORT = 7781;
 export const DEFAULT_ORIGINS = ['http://127.0.0.1:7070', 'http://localhost:7070'];
 export const DEFAULT_RUNTIME = path.join(HERE, '..', '..', 'plugin', 'runtime.json');
 const MAX_JSON = 64 * 1024;
+const MAX_SCRIPT_JSON = 256 * 1024; // a script may be 100 KB, escaped once more as JSON
 
 class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -49,13 +54,13 @@ function statusOf(e) {
   return 500;
 }
 
-function readJson(req) {
+function readJson(req, max = MAX_JSON) {
   return new Promise((resolve, reject) => {
     const parts = [];
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_JSON) { reject(new HttpError(413, 'too-large', 'The request is too large.')); req.destroy(); return; }
+      if (size > max) { reject(new HttpError(413, 'too-large', 'The request is too large.')); req.destroy(); return; }
       parts.push(c);
     });
     req.on('end', () => {
@@ -126,6 +131,7 @@ export async function startServer({
   let reading = null; // the Read images job, while it runs and once it is done
   const sync = new AutoSync({ config, saveConfig, dataDir: dir, build: buildAndKeep, busy: () => Boolean(reading && !reading.finished), log, ...syncOptions });
   const rules = new RulesFile({ config, saveConfig, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
+  const writer = new Writer({ config, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
   let stopping = false;
   let actualPort = port;
   const token = crypto.randomBytes(24).toString('base64url');
@@ -144,7 +150,7 @@ export async function startServer({
     let p;
 
     if (m('GET', /^\/api\/state$/)) {
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), ...workspaceState() });
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), ...workspaceState() });
     }
     if (m('PUT', /^\/api\/ragx$/)) {
       const body = await readJson(req);
@@ -215,6 +221,24 @@ export async function startServer({
       sync.set(name, on);
       return json(200, { name, on, sync: sync.report()[name] || null });
     }
+    /* Totem scripts from agents: written now if the canvas is closed, else
+     * queued until File Fabric lets go of it (t-a80b904d43). */
+    if (m('POST', /^\/api\/scripts$/)) {
+      const body = await readJson(req, MAX_SCRIPT_JSON);
+      if (typeof body.script !== 'string') throw new HttpError(400, 'bad-body', 'Send {"script": "<Canvas ...>", "owner": "..."}.');
+      return json(200, { entry: await writer.submit({ script: body.script, owner: body.owner }) });
+    }
+    if (m('GET', /^\/api\/scripts$/)) return json(200, { canvases: writer.report() });
+    if ((p = m('GET', /^\/api\/scripts\/([0-9a-f]+)$/))) {
+      const e = writer.entry(p[0]);
+      if (!e) throw new HttpError(404, 'not-found', `No script ${p[0]}.`);
+      return json(200, { entry: e });
+    }
+    if ((p = m('POST', /^\/api\/scripts\/([0-9a-f]+)\/cancel$/))) {
+      const e = writer.cancel(p[0]);
+      if (!e) throw new HttpError(409, 'not-waiting', 'Only a script still waiting can be cancelled.');
+      return json(200, { entry: e });
+    }
     if (m('POST', /^\/api\/shutdown$/)) {
       json(202, { stopping: true });
       setImmediate(() => stop('asked by the page').then(() => onStopped && onStopped()));
@@ -264,6 +288,7 @@ export async function startServer({
   writeLocal(path.join(path.dirname(runtimeFile), 'local.json'));
   sync.start();
   rules.start();
+  writer.start();
 
   let stopped = null;
   function stop(reason = 'stopped') {
@@ -273,6 +298,7 @@ export async function startServer({
       log(`Stopping (${reason})...`);
       await sync.stop();
       rules.stop();
+      await writer.stop();
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();
       removeRuntime();
@@ -286,5 +312,5 @@ export async function startServer({
     for (const s of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(s, onSignal);
   }
 
-  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, sync, rules, config: () => ({ ...config }) };
+  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, sync, rules, writer, config: () => ({ ...config }) };
 }

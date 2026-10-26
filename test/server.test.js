@@ -116,6 +116,22 @@ test('Keep in RAGX is switched per canvas, kept in config.json and reported', as
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).sync, {});
 });
 
+test('a totem script is written through the engine and reported per canvas', async () => {
+  const bad = await (await call('POST', '/api/scripts', { body: { script: '<Canvas name="Thesis"><Totem name="T">', owner: 'tester' } })).json();
+  assert.equal(bad.entry.status, 'refused');
+  assert.match(bad.entry.result.message, /^Line 1, column 23: <Totem> is never closed/);
+  const r = await call('POST', '/api/scripts', { body: { script: '<Canvas name="Thesis"><Totem name="Agent notes"><Area name="Box"><Text>hello</Text></Area></Totem></Canvas>', owner: 'tester' } });
+  const { entry } = await r.json();
+  assert.equal(entry.status, 'written', JSON.stringify(entry.result));
+  assert.deepEqual(entry.result.boxes.map((b) => b.address), ['Agent notes (totem)', 'Agent notes (totem) > Box']);
+  assert.equal((await (await call('GET', `/api/scripts/${entry.id}`)).json()).entry.status, 'written');
+  const st = await (await call('GET', '/api/state')).json();
+  assert.equal(st.scripts.Thesis.recent[0].id, entry.id);
+  const built = await (await call('GET', '/api/fabrics/Thesis')).json();
+  assert.match(built.markdown, /^## Agent notes \(totem\) > Box$/m);
+  assert.equal((await call('POST', `/api/scripts/${entry.id}/cancel`)).status, 409);
+});
+
 test('a fabric name cannot climb out of the workspace', async () => {
   // URL parsing folds an encoded ".." away before the route sees it.
   assert.equal(await raw('/api/fabrics/%2E%2E'), 404);
