@@ -130,6 +130,10 @@ test('a totem script is written through the engine and reported per canvas', asy
   const built = await (await call('GET', '/api/fabrics/Thesis')).json();
   assert.match(built.markdown, /^## Agent notes \(totem\) > Box$/m);
   assert.equal((await call('POST', `/api/scripts/${entry.id}/cancel`)).status, 409);
+  const read = await (await call('GET', '/api/fabrics/Thesis/script?at=' + encodeURIComponent('Agent notes (totem)'))).json();
+  assert.match(read.script, /<Totem name="Agent notes" id="[^"]+" owner="tester">\n {4}<Area name="Box" id="[^"]+">\n {6}<Text id="[^"]+">hello<\/Text>/);
+  assert.deepEqual([read.open, read.waiting], [false, 0]);
+  assert.equal((await call('GET', '/api/fabrics/Thesis/script?at=Nowhere')).status, 404);
 });
 
 test('a fabric name cannot climb out of the workspace', async () => {

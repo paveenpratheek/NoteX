@@ -34,6 +34,7 @@ import { AutoSync } from './sync.js';
 import { canvasFiles } from './files.js';
 import { RulesFile } from './agentrules.js';
 import { Writer } from './writer.js';
+import { readOut } from './readout.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -196,6 +197,17 @@ export async function startServer({
         return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name };
       });
       return json(200, { workspace: needWorkspace(), fabrics });
+    }
+    /* A canvas, or one place on it with ?at=, read out as a totem script
+     * with ids and owners, for an agent to read before it writes. */
+    if ((p = m('GET', /^\/api\/fabrics\/([^/]+)\/script$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      const at = url.searchParams.get('at') || null;
+      const script = readOut(readFabric(fdir), { at, ledger: writer.ledger(name) });
+      if (script === null) throw new HttpError(404, 'no-place', `No place on ${name} has the address "${at}".`);
+      const waiting = (writer.report()[name] || { waiting: [] }).waiting.length;
+      return json(200, { name, at, script, open: writer.isOpen(fdir), waiting });
     }
     if ((p = m('GET', /^\/api\/fabrics\/([^/]+)$/))) {
       const name = decodeURIComponent(p[0]);

@@ -77,14 +77,14 @@ export function wiresOf(state, included) {
   const wires = [];
   for (const link of state.links || []) {
     if (included.has(link.fromAreaId) && included.has(link.toAreaId) && link.fromAreaId !== link.toAreaId) {
-      wires.push({ from: link.fromAreaId, to: link.toAreaId, via: 'link', fromCorner: link.fromCorner || null, toCorner: link.toCorner || null });
+      wires.push({ id: link.id, from: link.fromAreaId, to: link.toAreaId, via: 'link', fromCorner: link.fromCorner || null, toCorner: link.toCorner || null });
     }
   }
   for (const d of state.drawings || []) {
     if (d.type !== 'line' || !d.start || !d.end) continue;
     const a = smallestAt(d.start), b = smallestAt(d.end);
     if (!a || !b || a.id === b.id || inArea(d.end, a) || inArea(d.start, b)) continue;
-    wires.push({ from: a.id, to: b.id, via: 'line' });
+    wires.push({ id: d.id, from: a.id, to: b.id, via: 'line' });
   }
   return wires;
 }

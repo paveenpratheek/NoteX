@@ -73,7 +73,7 @@ export function buildPlaces(fabric) {
 
   const places = new Map();
   const add = (p) => {
-    places.set(p.id, { children: [], files: [], texts: [], textByAgent: [], pens: 0, neighbours: [], wires: [], reach: null, ...p });
+    places.set(p.id, { children: [], files: [], texts: [], textByAgent: [], textIds: [], pens: 0, neighbours: [], wires: [], reach: null, ...p });
     return places.get(p.id);
   };
   const root = add({ id: 'fabric', kind: 'fabric', name: fabric.name, parent: null });
@@ -171,6 +171,8 @@ export function buildPlaces(fabric) {
       places.get(at).texts.push(plainText(d.text));
       // Which texts an agent wrote, so the rules file can leave them out (t-74338c1615).
       places.get(at).textByAgent.push(d.writtenBy === 'agent');
+      // Which drawing each text is, so a read-out can name it for <Edit id>.
+      places.get(at).textIds.push(d.id);
     } else places.get(at).pens++;
   }
 
