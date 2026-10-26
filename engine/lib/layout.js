@@ -101,6 +101,11 @@ export class Scene {
 
   totemOf(e) {
     if (e.kind === 'totem') return e.item;
+    // File Fabric clears linkedTotemId on a Line NoteX drew; its joins still name its boxes (t-3bfb83748d).
+    if (e.item.type === 'line' && Array.isArray(e.item.joins)) {
+      const end = this.byId.get(e.item.joins[0]);
+      if (end && end !== e) return this.totemOf(end);
+    }
     const t = this.chain(e).find((k) => k.startsWith('totem:'));
     return t ? this.byId.get(t.slice(6))?.item || null : null;
   }

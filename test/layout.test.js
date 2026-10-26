@@ -246,7 +246,8 @@ test('Remove takes off an agent\'s own item, with what is inside it and the wire
   const id = (name) => state.areas.find((a) => a.name === name).id;
   const line = state.drawings.find((d) => d.type === 'line' && d.writtenBy === 'agent');
   const sizes = { A: box(state, 'A'), C: box(state, 'C') };
-  // A Line alone.
+  // A Line alone - even after File Fabric's save has cleared its totem (t-3bfb83748d).
+  line.linkedTotemId = null;
   layoutEdits(parseScript(`<Canvas name="Thesis"><Remove id="${line.id}"/></Canvas>`), state, opts);
   assert.ok(!state.drawings.includes(line));
   assert.ok(state.areas.some((a) => a.name === 'B'), 'the boxes it joined stay');
