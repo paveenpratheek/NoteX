@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listFabrics, isFabric, FabricError } from './lib/fabric.js';
-import { buildFabric, startServer } from './lib/server.js';
+import { buildFabric, startServer, writeBuilt as keepBuilt } from './lib/server.js';
 import { writeLocal, REPO } from './lib/lifecycle.js';
 import { readFabricImages } from './lib/read.js';
 import { RagxError } from './lib/ragx.js';
@@ -44,9 +44,7 @@ function parse(argv) {
 }
 
 function writeBuilt(out, name, built) {
-  fs.mkdirSync(out, { recursive: true });
-  fs.writeFileSync(path.join(out, `${name}.notex.md`), built.markdown);
-  fs.writeFileSync(path.join(out, `${name}.places.json`), JSON.stringify(built.map, null, 2));
+  keepBuilt(out, name, built);
   console.log(`✓ ${name}: ${built.map.places.length} places, ${built.markdown.length} characters (${built.ms} ms)`);
 }
 

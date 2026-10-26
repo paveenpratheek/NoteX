@@ -28,6 +28,7 @@ import { fabricImages, Readings } from './images.js';
 import { readFabricImages } from './read.js';
 import { ragxFolder, RagxError } from './ragx.js';
 import { AutoSync } from './sync.js';
+import { canvasFiles } from './files.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -80,7 +81,17 @@ export function buildFabric(dir, { dataDir = null } = {}) {
   const model = buildPlaces(fabric);
   const images = fabricImages(model, fabric, { dataDir, readings: new Readings(dataDir) });
   const unread = images.filter((im) => !im.file.image.reading).length;
-  return { markdown: toMarkdown(model), map: toPlaceMap(model), images: images.length, unread, ms: Date.now() - started };
+  return { markdown: toMarkdown(model), map: toPlaceMap(model), files: canvasFiles(model), images: images.length, unread, ms: Date.now() - started };
+}
+
+/* What a build leaves in a docs folder: the document, its place map and the
+ * files RAGX reads with their places (t-99b4d2b864). The file list goes
+ * first, so RAGX never takes a document newer than its list. */
+export function writeBuilt(out, name, built) {
+  fs.mkdirSync(out, { recursive: true });
+  fs.writeFileSync(path.join(out, `${name}.files.json`), JSON.stringify(built.files, null, 2));
+  fs.writeFileSync(path.join(out, `${name}.notex.md`), built.markdown);
+  fs.writeFileSync(path.join(out, `${name}.places.json`), JSON.stringify(built.map, null, 2));
 }
 
 export async function startServer({
@@ -107,8 +118,7 @@ export async function startServer({
   // The last build is kept, so what NoteX made can be read outside the page - and by RAGX.
   const buildAndKeep = (name) => {
     const built = buildFabric(fabricDir(needWorkspace(), name), { dataDir: dir });
-    fs.writeFileSync(path.join(dir, 'docs', `${name}.notex.md`), built.markdown);
-    fs.writeFileSync(path.join(dir, 'docs', `${name}.places.json`), JSON.stringify(built.map, null, 2));
+    writeBuilt(path.join(dir, 'docs'), name, built);
     return built;
   };
 

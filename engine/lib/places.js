@@ -7,6 +7,7 @@
  * Nesting, pages and totems come from what File Fabric saved in fabric.json;
  * its rules are run only where a value is missing (t-819ff85db2).
  */
+import path from 'node:path';
 import { itemCenter, areaBBox, itemBBox, distToBBox, bboxDistance, direction } from './geometry.js';
 import { parentAreaOf, assignedAreaOf, magneticTotems, FIELD } from './rules.js';
 import { checklist, reachedNotes, wiresOf } from './wires.js';
@@ -156,7 +157,10 @@ export function buildPlaces(fabric) {
     if (f.isHidden) { left.hidden++; continue; }
     const at = placeFor(f, false);
     if (!at) continue;
-    places.get(at).files.push({ id: f.id, name: f.name, kind: fileKind(f), url: f.isYoutube ? f.youtubeUrl || null : null, inSources: fabric.sources ? fabric.sources.has(f.name) : null });
+    const inSources = fabric.sources ? fabric.sources.has(f.name) : null;
+    // Where File Fabric keeps its copy, so an agent can open the file where it sits (t-f6bb073bcf).
+    const copy = inSources && fabric.dir ? path.join(fabric.dir, 'sources', f.name) : null;
+    places.get(at).files.push({ id: f.id, name: f.name, kind: fileKind(f), url: f.isYoutube ? f.youtubeUrl || null : null, inSources, path: copy });
   }
   const NEVER_DRAWN = new Set(['path', 'draw', 'select', 'pan', 'delete']);
   for (const d of state.drawings || []) {

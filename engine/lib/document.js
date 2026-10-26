@@ -115,7 +115,7 @@ function section(p, model) {
   const others = p.files.filter((f) => !f.image);
   if (others.length) {
     lines.push('', 'Files:');
-    for (const f of others) lines.push(`- ${one(f.name || 'unnamed')} (${f.kind}${f.url ? `, ${f.url}` : ''})`);
+    for (const f of others) lines.push(`- ${one(f.name || 'unnamed')} (${f.kind}${f.url ? `, ${f.url}` : ''})${f.path ? ` - File: ${f.path}` : ''}`);
   }
   for (const f of images) lines.push('', imageEntry(f));
   if (p.pens) lines.push('', `Handwriting: ${plural(p.pens, 'pen stroke')}, not read yet.`);
