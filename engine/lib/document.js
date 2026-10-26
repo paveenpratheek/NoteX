@@ -164,6 +164,8 @@ export function toPlaceMap(model) {
       id: p.id, kind: p.kind, name: p.name ?? null, label: p.label, address: p.address,
       parent: p.parent, children: p.children,
       totem: p.totemId || null, totemVia: p.totemVia || null,
+      // An agent's totem names its owner, so the page can mark it (t-ab2864c2a1).
+      ...(p.kind === 'totem' ? { owner: p.totem.writtenBy === 'agent' && p.totem.owner ? p.totem.owner : null } : {}),
       page: p.page || null,
       neighbours: p.neighbours, wires: p.wires, reach: p.reach,
       checklist: p.checklist || null,

@@ -98,7 +98,7 @@ async function refresh() {
   setStatus('up', `Engine running · ${st.fabrics} fabric${st.fabrics === 1 ? '' : 's'}`);
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
-  else if (S.built) { renderSync((st.sync && st.sync[S.fabric]) || null); renderRules(st.rules); } // a save in File Fabric starts a sync
+  else if (S.built) { renderSync((st.sync && st.sync[S.fabric]) || null); renderRules(st.rules); renderScripts(); } // a save in File Fabric starts a sync
   if (!was && st.reading && !st.reading.finished) followReading();
 }
 
@@ -135,6 +135,8 @@ async function loadFabrics() {
     const when = el('span', f.unread ? 'when todo' : 'when', `saved ${f.modified.slice(0, 10)}${imgs}`);
     if (f.sync) when.append(el('span', 'kept', ' · kept in RAGX'));
     if (f.rules) when.append(el('span', 'kept', ' · rules canvas'));
+    const waitingFor = S.state && S.state.scripts && S.state.scripts[f.name] ? S.state.scripts[f.name].waiting.length : 0;
+    if (waitingFor) when.append(el('span', 'kept', ` · ${waitingFor} agent script${waitingFor === 1 ? '' : 's'} waiting`));
     b.append(el('span', null, f.name), when);
     b.dataset.name = f.name;
     b.addEventListener('click', () => openFabric(f.name));
@@ -189,6 +191,7 @@ async function openFabric(name) {
     : !n ? 'This canvas has no images to read' : !unread ? 'Every image on this canvas is read' : `Have RAGX read ${unread} image${unread === 1 ? '' : 's'} with Haiku, two at a time`;
   renderSync(S.built.sync);
   renderRules(S.built.rules);
+  renderScripts();
   // A finished job's line is about its own canvas, not this one.
   const job = S.state && S.state.reading;
   if (job && job.finished && job.fabric !== name) $('reading').hidden = true;
@@ -219,7 +222,8 @@ function renderTree() {
       : p.label.replace(/ \((totem|note|scroll box)\)$/, '');
     b.append(el('span', 'name', shown));
     const kind = p.kind === 'fabric' ? '' : KIND_WORD[p.kind] ?? '';
-    if (kind && !q) b.append(el('span', 'kind', kind));
+    if (p.owner && !q) b.append(el('span', 'kind agent', `totem · ${p.owner}`));
+    else if (kind && !q) b.append(el('span', 'kind', kind));
     const n = p.files.length + p.texts + (p.pens ? 1 : 0);
     if (p.checklist && p.checklist.total) b.append(el('span', 'count', `${p.checklist.done}/${p.checklist.total}`));
     else if (n) b.append(el('span', 'count', String(n)));
@@ -386,6 +390,46 @@ async function toggleRules() {
     toast(on ? `${S.fabric} is the rules canvas - its own words are in rules.md.` : `${S.fabric} is no longer the rules canvas; rules.md holds only the fixed lines.`);
     loadFabrics();
   } catch (e) { toast(e.message, true); }
+}
+
+/* ------------------------------------------------------ agent scripts */
+
+/* Totem scripts agents sent for the open canvas: those waiting while File
+ * Fabric has it open, which can be cancelled, and the last few written or
+ * refused (t-a80b904d43). */
+function renderScripts() {
+  const line = $('scripts-line');
+  const c = S.state && S.state.scripts && S.fabric ? S.state.scripts[S.fabric] : null;
+  clearTimeout(renderScripts.timer);
+  // A script waiting a moment ago has been written: the canvas is built again to show it.
+  const was = renderScripts.waiting;
+  renderScripts.waiting = { fabric: S.fabric, n: c ? c.waiting.length : 0 };
+  if (was && was.fabric === S.fabric && was.n > renderScripts.waiting.n && S.built) { openFabric(S.fabric); return; }
+  if (!c || (!c.waiting.length && !c.recent.length)) { line.hidden = true; return; }
+  line.hidden = false;
+  // Drawn again only when something changed, so a Cancel is never pulled from under a click.
+  const key = JSON.stringify([S.fabric, c.open, c.waiting.map((w) => w.id), c.recent.map((r) => r.id + r.status)]);
+  if (c.waiting.length) renderScripts.timer = setTimeout(refresh, 5000);
+  if (key === renderScripts.key) return;
+  renderScripts.key = key;
+  line.replaceChildren();
+  if (c.waiting.length) {
+    line.append(el('span', 'script', `${c.waiting.length} agent script${c.waiting.length === 1 ? '' : 's'} waiting - ${c.open ? 'File Fabric has this canvas open; NoteX writes them 30 s after it is closed' : 'being written'}:`));
+    for (const w of c.waiting) {
+      const row = el('span', 'script', `· ${w.what}, from ${w.owner}, sent ${ago(w.at)} `);
+      const cancel = el('span', 'jump', 'Cancel');
+      cancel.addEventListener('click', async () => {
+        try { await engine.cancelScript(w.id); toast(`Cancelled ${w.what} from ${w.owner}.`); await refresh(); } catch (e) { toast(e.message, true); }
+      });
+      row.append(cancel);
+      line.append(row);
+    }
+  }
+  const WORD = { written: 'Written', refused: 'Refused', failed: 'Could not write', cancelled: 'Cancelled' };
+  for (const r of c.recent.slice(0, 3)) {
+    const why = r.result && r.result.message && r.status !== 'written' ? ` - ${r.result.message}` : '';
+    line.append(el('span', r.status === 'written' ? 'script' : 'script bad', `${WORD[r.status] || r.status}: ${r.what}, from ${r.owner}, ${ago(r.done || r.at)}${why}`));
+  }
 }
 
 async function setRagxFolder() {

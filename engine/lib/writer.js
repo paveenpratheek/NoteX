@@ -138,6 +138,10 @@ export class Writer {
     try {
       parsed = parseScript(script);
       this.canvasDir(parsed.canvas);
+      // The rules canvas takes only the user's own words; a script is always an agent's (t-ad316ec0c1).
+      if (this.config.rules && parsed.canvas.toLowerCase() === String(this.config.rules).toLowerCase()) {
+        throw new Refusal(`${parsed.canvas} is the rules canvas, which holds only the user's own words - agents never write on it. If the user wants words of yours there, they write them themselves.`);
+      }
     } catch (e) {
       if (!(e instanceof ScriptError || e instanceof Refusal)) throw e;
       // Never queued: a script that does not read is the agent's to fix now.
@@ -189,6 +193,9 @@ export class Writer {
   apply(entry) {
     let dir;
     try { dir = this.canvasDir(entry.canvas); } catch (e) { return this.finish(entry, 'refused', { message: e.message }); }
+    if (this.config.rules && entry.canvas.toLowerCase() === String(this.config.rules).toLowerCase()) {
+      return this.finish(entry, 'refused', { message: `${entry.canvas} became the rules canvas while this waited - agents never write on it.` });
+    }
     const parsed = parseScript(entry.script);
     if (!fs.existsSync(path.join(dir, 'fabric.json'))) {
       if (parsed.kind !== 'totem') return this.finish(entry, 'refused', { message: `There is no canvas called ${entry.canvas} in File Fabric's workspace.` });

@@ -197,3 +197,12 @@ test('a totem for a canvas that does not exist yet makes the canvas', async (t) 
   const add = await writer.submit({ script: '<Add canvas="Nowhere" at="X"><Text>a</Text></Add>', owner: 'a' });
   assert.match(add.result.message, /no canvas called Nowhere/);
 });
+
+test('the rules canvas is never written by an agent', async (t) => {
+  const { dir, writer } = setup(t);
+  writer.config.rules = 'Thesis';
+  const e = await writer.submit({ script: EXAMPLE, owner: 'a' });
+  assert.equal(e.status, 'refused');
+  assert.match(e.result.message, /Thesis is the rules canvas, which holds only the user's own words/);
+  assert.equal(read(dir).totems.length, 2);
+});

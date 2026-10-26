@@ -194,7 +194,8 @@ export async function startServer({
       const fabrics = listFabrics(needWorkspace()).map(({ name, dir: fdir, modified, size }) => {
         let counts = { images: null, unread: null };
         try { const b = buildFabric(fdir, { dataDir: dir }); counts = { images: b.images, unread: b.unread }; } catch (_) { /* shown without counts */ }
-        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name };
+        // Whether File Fabric has it open: a script for it waits until it is closed (t-a80b904d43).
+        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name, open: writer.isOpen(fdir) };
       });
       return json(200, { workspace: needWorkspace(), fabrics });
     }

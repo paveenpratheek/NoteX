@@ -71,4 +71,5 @@ export class Engine {
   setRagx(p) { return this.json('PUT', '/api/ragx', { path: p }); }
   setSync(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/sync`, { on }); }
   setRules(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/rules`, { on }); }
+  cancelScript(id) { return this.json('POST', `/api/scripts/${encodeURIComponent(id)}/cancel`); }
 }
