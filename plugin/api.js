@@ -70,4 +70,5 @@ export class Engine {
   readImages(name) { return this.json('POST', `/api/fabrics/${encodeURIComponent(name)}/read`); }
   setRagx(p) { return this.json('PUT', '/api/ragx', { path: p }); }
   setSync(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/sync`, { on }); }
+  setRules(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/rules`, { on }); }
 }

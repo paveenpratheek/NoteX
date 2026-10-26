@@ -91,6 +91,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .places input { margin: 8px 8px 0; }
 .places .col-head button { padding: 3px 9px; font-size: 12.5px; }
 .reading-line { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+/* The import line for ~/.claude/CLAUDE.md, selectable to copy. */
+.reading-line code.import { user-select: all; font-family: ui-monospace, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
 /* Keep in RAGX: a switch, lit while the canvas is kept in sync. */
 button.switch { margin-right: 6px; }
 button.switch::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }

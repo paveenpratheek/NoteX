@@ -73,7 +73,7 @@ export function buildPlaces(fabric) {
 
   const places = new Map();
   const add = (p) => {
-    places.set(p.id, { children: [], files: [], texts: [], pens: 0, neighbours: [], wires: [], reach: null, ...p });
+    places.set(p.id, { children: [], files: [], texts: [], textByAgent: [], pens: 0, neighbours: [], wires: [], reach: null, ...p });
     return places.get(p.id);
   };
   const root = add({ id: 'fabric', kind: 'fabric', name: fabric.name, parent: null });
@@ -167,8 +167,11 @@ export function buildPlaces(fabric) {
     if (!readable(d)) { if (NEVER_DRAWN.has(d.type)) left.unshown++; continue; }
     const at = placeFor(d, true);
     if (!at) continue;
-    if (d.type === 'text') places.get(at).texts.push(plainText(d.text));
-    else places.get(at).pens++;
+    if (d.type === 'text') {
+      places.get(at).texts.push(plainText(d.text));
+      // Which texts an agent wrote, so the rules file can leave them out (t-74338c1615).
+      places.get(at).textByAgent.push(d.writtenBy === 'agent');
+    } else places.get(at).pens++;
   }
 
   // The tree, children in reading order: top to bottom, then left to right.

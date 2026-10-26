@@ -29,6 +29,7 @@ import { readFabricImages } from './read.js';
 import { ragxFolder, RagxError } from './ragx.js';
 import { AutoSync } from './sync.js';
 import { canvasFiles } from './files.js';
+import { RulesFile } from './agentrules.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -124,6 +125,7 @@ export async function startServer({
 
   let reading = null; // the Read images job, while it runs and once it is done
   const sync = new AutoSync({ config, saveConfig, dataDir: dir, build: buildAndKeep, busy: () => Boolean(reading && !reading.finished), log, ...syncOptions });
+  const rules = new RulesFile({ config, saveConfig, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
   let stopping = false;
   let actualPort = port;
   const token = crypto.randomBytes(24).toString('base64url');
@@ -142,7 +144,7 @@ export async function startServer({
     let p;
 
     if (m('GET', /^\/api\/state$/)) {
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), ...workspaceState() });
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), ...workspaceState() });
     }
     if (m('PUT', /^\/api\/ragx$/)) {
       const body = await readJson(req);
@@ -171,9 +173,10 @@ export async function startServer({
       if (!ws || !path.isAbsolute(ws)) throw new HttpError(400, 'bad-path', 'Give the workspace as a full path, e.g. E:\\FILES\\my workspace.');
       const fabrics = listFabrics(ws);
       // Canvases switched on belong to the workspace they were switched on in.
-      if (config.workspace && path.resolve(ws) !== config.workspace) delete config.sync;
+      if (config.workspace && path.resolve(ws) !== config.workspace) { delete config.sync; delete config.rules; }
       config.workspace = path.resolve(ws);
       saveConfig();
+      rules.tick();
       return json(200, { workspace: config.workspace, fabrics: fabrics.length });
     }
     /* Each fabric with how many images it has and how many are not read yet,
@@ -184,13 +187,23 @@ export async function startServer({
       const fabrics = listFabrics(needWorkspace()).map(({ name, dir: fdir, modified, size }) => {
         let counts = { images: null, unread: null };
         try { const b = buildFabric(fdir, { dataDir: dir }); counts = { images: b.images, unread: b.unread }; } catch (_) { /* shown without counts */ }
-        return { name, modified, size, ...counts, sync: synced[name] || null };
+        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name };
       });
       return json(200, { workspace: needWorkspace(), fabrics });
     }
     if ((p = m('GET', /^\/api\/fabrics\/([^/]+)$/))) {
       const name = decodeURIComponent(p[0]);
-      return json(200, { name, ...buildAndKeep(name), sync: sync.report()[name] || null });
+      return json(200, { name, ...buildAndKeep(name), sync: sync.report()[name] || null, rules: rules.report() });
+    }
+    /* The rules canvas: marked, it is written to rules.md now and after each save. */
+    if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/rules$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
+      if (on && !fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No fabric ${name} in the workspace.`);
+      rules.set(name, on);
+      return json(200, { name, on, rules: rules.report() });
     }
     /* Keep in RAGX: switched on, the canvas is synced now and after each save. */
     if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/sync$/))) {
@@ -250,6 +263,7 @@ export async function startServer({
   const removeRuntime = writeRuntime(runtimeFile, { url, port: actualPort, token, pid: process.pid, dataDir: dir, version: VERSION, startedAt: new Date().toISOString() });
   writeLocal(path.join(path.dirname(runtimeFile), 'local.json'));
   sync.start();
+  rules.start();
 
   let stopped = null;
   function stop(reason = 'stopped') {
@@ -258,6 +272,7 @@ export async function startServer({
     stopped = (async () => {
       log(`Stopping (${reason})...`);
       await sync.stop();
+      rules.stop();
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();
       removeRuntime();
@@ -271,5 +286,5 @@ export async function startServer({
     for (const s of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(s, onSignal);
   }
 
-  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, sync, config: () => ({ ...config }) };
+  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, sync, rules, config: () => ({ ...config }) };
 }

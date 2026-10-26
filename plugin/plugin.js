@@ -98,7 +98,7 @@ async function refresh() {
   setStatus('up', `Engine running · ${st.fabrics} fabric${st.fabrics === 1 ? '' : 's'}`);
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
-  else if (S.built) renderSync((st.sync && st.sync[S.fabric]) || null); // a save in File Fabric starts a sync
+  else if (S.built) { renderSync((st.sync && st.sync[S.fabric]) || null); renderRules(st.rules); } // a save in File Fabric starts a sync
   if (!was && st.reading && !st.reading.finished) followReading();
 }
 
@@ -134,6 +134,7 @@ async function loadFabrics() {
     const imgs = !f.images ? '' : f.unread ? ` · ${f.unread} image${f.unread === 1 ? '' : 's'} to read` : ` · ${f.images} image${f.images === 1 ? '' : 's'} read`;
     const when = el('span', f.unread ? 'when todo' : 'when', `saved ${f.modified.slice(0, 10)}${imgs}`);
     if (f.sync) when.append(el('span', 'kept', ' · kept in RAGX'));
+    if (f.rules) when.append(el('span', 'kept', ' · rules canvas'));
     b.append(el('span', null, f.name), when);
     b.dataset.name = f.name;
     b.addEventListener('click', () => openFabric(f.name));
@@ -187,6 +188,7 @@ async function openFabric(name) {
   $('read-btn').title = busy ? `Reading the images of ${S.state.reading.fabric} - one canvas at a time`
     : !n ? 'This canvas has no images to read' : !unread ? 'Every image on this canvas is read' : `Have RAGX read ${unread} image${unread === 1 ? '' : 's'} with Haiku, two at a time`;
   renderSync(S.built.sync);
+  renderRules(S.built.rules);
   // A finished job's line is about its own canvas, not this one.
   const job = S.state && S.state.reading;
   if (job && job.finished && job.fabric !== name) $('reading').hidden = true;
@@ -347,6 +349,41 @@ async function toggleSync() {
   } catch (e) { toast(e.message, true); }
 }
 
+/* ---------------------------------------------------------- rules canvas */
+
+/* The open canvas's Rules canvas switch, and - on the rules canvas - what
+ * rules.md holds: its size, since every agent reply reads it again, and the
+ * line the user's CLAUDE.md imports it with (t-f93928ce0d, t-00728790ad). */
+function renderRules(rules) {
+  const on = Boolean(rules && rules.canvas && rules.canvas === S.fabric);
+  const btn = $('rules-btn');
+  btn.setAttribute('aria-checked', String(on));
+  btn.title = on ? 'The rules canvas: its own words are written to rules.md after each save. Press to stop.'
+    : rules && rules.canvas ? `${rules.canvas} is the rules canvas now - press to make this one it instead`
+    : 'Make this the rules canvas: its own words become rules every agent loads';
+  const line = $('rules-line');
+  line.hidden = !on;
+  if (!on) return;
+  line.replaceChildren();
+  const size = rules.tokens == null ? '' : ` · about ${rules.tokens.toLocaleString()} tokens${rules.warn ? ` - over ${rules.limit.toLocaleString()}, and read with every agent reply` : ''}`;
+  line.append(`Rules for agents: rules.md${size}${rules.at ? ` · written ${ago(rules.at)}` : ''}${rules.error ? ` - ${rules.error}` : ''}`);
+  line.classList.toggle('bad', Boolean(rules.warn || rules.error));
+  const imp = el('code', 'import', rules.importLine);
+  imp.title = 'The line your ~/.claude/CLAUDE.md loads it with';
+  line.append(el('br'), 'Loaded by: ', imp);
+}
+
+async function toggleRules() {
+  if (!S.fabric) return;
+  const on = $('rules-btn').getAttribute('aria-checked') !== 'true';
+  try {
+    const r = await engine.setRules(S.fabric, on);
+    renderRules(r.rules);
+    toast(on ? `${S.fabric} is the rules canvas - its own words are in rules.md.` : `${S.fabric} is no longer the rules canvas; rules.md holds only the fixed lines.`);
+    loadFabrics();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function setRagxFolder() {
   $('menu').hidden = true;
   const now = S.state && S.state.ragx;
@@ -384,6 +421,7 @@ $('ws-change').addEventListener('click', () => { $('ws-path').value = S.state.wo
 $('reload').addEventListener('click', loadFabrics);
 $('read-btn').addEventListener('click', readImages);
 $('sync-btn').addEventListener('click', toggleSync);
+$('rules-btn').addEventListener('click', toggleRules);
 $('ragx-btn').addEventListener('click', setRagxFolder);
 $('filter').addEventListener('input', () => S.built && renderTree());
 $('show-place').addEventListener('click', () => showView('place'));
