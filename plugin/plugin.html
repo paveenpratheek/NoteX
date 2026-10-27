@@ -11,20 +11,22 @@
 <body>
 <header class="bar">
   <div class="brand">
-    <span class="dot" id="dot" aria-hidden="true"></span>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7M17.5 14v7"/></svg>
     <strong>NoteX</strong>
-    <span class="status" id="status">Looking for the engine…</span>
+    <span class="tag">File Fabric to RAGX</span>
   </div>
-  <div class="grow"></div>
-  <span class="note" id="ws-label"></span>
-  <button id="ws-change" class="link" hidden>Change</button>
+  <div class="pill" role="status"><span class="dot" id="dot" aria-hidden="true"></span><span id="status">Looking for the engine…</span></div>
+  <div class="bar-end">
+    <span class="path" id="ws-label"></span>
+    <button id="ws-change" hidden>Change workspace</button>
   <div class="menu">
-    <button id="menu-btn" class="icon" aria-haspopup="true" aria-expanded="false" title="More">⋯</button>
+    <button id="menu-btn" class="icon-btn" aria-haspopup="true" aria-expanded="false" aria-label="More" title="More"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
     <div id="menu" class="popover" hidden>
       <button id="refresh-btn">Check the engine again</button>
       <button id="ragx-btn">Where RAGX is…</button>
       <button id="stop-btn" class="danger">Stop engine</button>
     </div>
+  </div>
   </div>
 </header>
 
@@ -58,29 +60,32 @@
   </section>
 
   <section id="browse" class="browse" hidden>
-    <aside class="col fabrics">
-      <div class="col-head"><strong>Fabrics</strong><button id="reload" class="icon" title="Read the workspace again">↻</button></div>
+    <aside class="sheet fabrics" aria-label="Canvases">
+      <div class="sheet-head"><span class="eyebrow">Canvases</span><button id="reload" class="icon-btn" aria-label="Read the workspace again" title="Read the workspace again"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button></div>
       <ul id="fabric-list" class="list"></ul>
     </aside>
-    <aside class="col places">
-      <div class="col-head"><strong id="places-title">Places</strong><span class="note" id="built"></span><span class="grow"></span><button id="rules-btn" class="switch" role="switch" aria-checked="false" title="Make this the rules canvas: its own words become rules every agent loads">Rules canvas</button><button id="sync-btn" class="switch" role="switch" aria-checked="false" title="Keep this canvas in RAGX: synced now and after each save">Keep in RAGX</button><button id="read-btn" title="Have RAGX read this fabric's images with Haiku, two at a time">Read images</button></div>
-      <div class="note reading-line" id="reading" hidden></div>
-      <div class="note reading-line" id="sync-line" hidden></div>
-      <div class="note reading-line" id="rules-line" hidden></div>
-      <div class="note reading-line" id="scripts-line" hidden></div>
-      <input id="filter" placeholder="Find a place" spellcheck="false">
+    <aside class="sheet places" aria-label="Places">
+      <div class="title-row"><h1 id="places-title">Places</h1><span class="note" id="built"></span></div>
+      <div class="switches"><button id="rules-btn" class="switch" role="switch" aria-checked="false" title="Make this the rules canvas: its own words become rules every agent loads">Rules canvas</button><button id="sync-btn" class="switch" role="switch" aria-checked="false" title="Keep this canvas in RAGX: synced now and after each save">Keep in RAGX</button><button id="read-btn" title="Have RAGX read this fabric's images with Haiku, two at a time">Read images</button></div>
+      <div class="lines">
+        <div class="note line-card" id="reading" hidden></div>
+        <div class="note line-card" id="sync-line" hidden></div>
+        <div class="note line-card" id="rules-line" hidden></div>
+        <div class="note line-card" id="scripts-line" hidden></div>
+      </div>
+      <label class="find"><span class="sr">Find a place</span><input id="filter" placeholder="Find a place" spellcheck="false"></label>
       <ul id="tree" class="tree"></ul>
     </aside>
-    <article class="col view">
-      <div class="col-head">
+    <article class="sheet view" aria-label="The place">
+      <div class="view-head">
         <code id="address" class="address"></code>
-        <div class="seg">
+        <div class="seg" role="group" aria-label="View">
           <button id="show-place" class="on">Place</button>
           <button id="show-doc">Whole document</button>
         </div>
       </div>
-      <div id="section" class="section"></div>
-      <pre id="doc" class="doc" hidden></pre>
+      <div id="section" class="section card"></div>
+      <pre id="doc" class="doc card" hidden></pre>
     </article>
   </section>
 </main>

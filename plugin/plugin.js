@@ -7,6 +7,7 @@
  * textContent, never written into HTML: a note can hold anything.
  */
 import { Engine, EngineDown, EngineRefused } from './api.js';
+import { followWallpaper } from './wallpaper.js';
 
 const TM = window.TerManager;
 const engine = new Engine('.');
@@ -130,14 +131,16 @@ async function loadFabrics() {
   ul.replaceChildren();
   for (const f of S.fabrics) {
     const b = el('button', null);
-    // Where Read images still has work: "29 images to read".
-    const imgs = !f.images ? '' : f.unread ? ` · ${f.unread} image${f.unread === 1 ? '' : 's'} to read` : ` · ${f.images} image${f.images === 1 ? '' : 's'} read`;
-    const when = el('span', f.unread ? 'when todo' : 'when', `saved ${f.modified.slice(0, 10)}${imgs}`);
-    if (f.sync) when.append(el('span', 'kept', ' · kept in RAGX'));
-    if (f.rules) when.append(el('span', 'kept', ' · rules canvas'));
+    // Under the name: when it was saved, then a chip for each thing worth knowing (t-a568290e5c).
+    const when = el('span', 'when', `saved ${f.modified.slice(0, 10)}`);
+    const chip = (text, kind = '') => when.append(el('span', `chip ${kind}`.trim(), text));
+    // Where Read images still has work: "29 to read".
+    if (f.images) chip(f.unread ? `${f.unread} to read` : `${f.images} image${f.images === 1 ? '' : 's'} read`, f.unread ? 'warn' : '');
+    if (f.sync) chip('Kept in RAGX', 'acc');
+    if (f.rules) chip('Rules canvas', 'warn');
     const waitingFor = S.state && S.state.scripts && S.state.scripts[f.name] ? S.state.scripts[f.name].waiting.length : 0;
-    if (waitingFor) when.append(el('span', 'kept', ` · ${waitingFor} agent script${waitingFor === 1 ? '' : 's'} waiting`));
-    b.append(el('span', null, f.name), when);
+    if (waitingFor) chip(`${waitingFor} script${waitingFor === 1 ? '' : 's'} waiting`, 'acc');
+    b.append(el('span', 'name', f.name), when);
     b.dataset.name = f.name;
     b.addEventListener('click', () => openFabric(f.name));
     const li = el('li', null);
@@ -476,6 +479,7 @@ $('show-place').addEventListener('click', () => showView('place'));
 $('show-doc').addEventListener('click', () => showView('doc'));
 
 (async () => {
+  followWallpaper();
   if (TM && TM.ready) { try { await TM.ready; } catch (_) {} }
   try { S.dataDir = (await hostCall('host.dataDir')).dir; } catch (_) { S.dataDir = null; }
   S.local = await engine.local();

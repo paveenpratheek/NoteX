@@ -1,6 +1,13 @@
 /* Built from ter-manager's palette only, as RAGX's page is: plugin-host.js
- * puts --pal-* on <html> and keeps them current. The fallbacks are for
- * opening the page on its own. */
+ * puts --pal-* on <html> and keeps them current, and ter-manager derives that
+ * palette from the wallpaper, so the accent, highlights and glass all move
+ * with the picture. The fallbacks are for opening the page on its own.
+ *
+ * The look is RAGX's (t-a568290e5c): the wallpaper as the ground, floating
+ * frosted sheets on it with 10 px gaps, a liquid bar above, nearly solid
+ * cards inside for text - one blur per surface, each straight on the ground.
+ * The corners are sharper than RAGX's: 14 px sheets, 8 px cards, 6 px chips
+ * (t-ee39df7d26). */
 :root {
   --bg: var(--pal-bg, #f5f5f3);
   --raise: var(--pal-raise, #ffffff);
@@ -11,119 +18,236 @@
   --green: var(--pal-green, #23905a);
   --yellow: var(--pal-yellow, #b98000);
   --mono-font: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  --line: color-mix(in srgb, var(--fg) 13%, transparent);
-  --soft: color-mix(in srgb, var(--fg) 5%, var(--raise));
-  --muted: color-mix(in srgb, var(--fg) 62%, transparent);
-  --acc-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --radius: 8px;
+  --line: color-mix(in srgb, var(--fg) 11%, transparent);
+  --soft: color-mix(in srgb, var(--fg) 6%, transparent);
+  --muted: color-mix(in srgb, var(--fg) 64%, transparent);
+  --fg-2: color-mix(in srgb, var(--fg) 86%, transparent);
+  --acc-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --acc-shadow: color-mix(in srgb, var(--accent) 30%, transparent);
+  --acc-text: color-mix(in srgb, var(--accent) 70%, var(--fg));
+  --warn-soft: color-mix(in srgb, var(--yellow) 18%, transparent);
+  --warn-text: color-mix(in srgb, var(--yellow) 72%, var(--fg));
+  --raised: color-mix(in srgb, var(--fg) 6%, var(--raise));
+
+  /* Glass, mixed as RAGX and GitX mix it. */
+  --sheet:  color-mix(in srgb, var(--raise) 58%, transparent);
+  --bar:    color-mix(in srgb, var(--raise) 48%, transparent);
+  --card:   color-mix(in srgb, color-mix(in srgb, #fff 55%, var(--raised)) 80%, transparent);
+  --chip:   color-mix(in srgb, color-mix(in srgb, #fff 50%, var(--raised)) 70%, transparent);
+  --well:   color-mix(in srgb, #fff 72%, transparent);
+  --rim:    rgba(255, 255, 255, .62);
+  --sheen:  rgba(255, 255, 255, .55);
+  --spec:   rgba(255, 255, 255, .95);
+  --lift:   0 14px 34px rgba(40, 20, 60, .14), 0 2px 6px rgba(0, 0, 0, .06);
+  --blur-sheet: blur(26px) saturate(170%);
+  --blur-bar:   blur(18px) saturate(190%);
+
+  /* Corners (t-ee39df7d26). */
+  --r-sheet: 14px;
+  --r-card: 8px;
+  --r-chip: 6px;
   color-scheme: light;
 }
-:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --sheet:  color-mix(in srgb, var(--raise) 72%, transparent);
+  --bar:    color-mix(in srgb, var(--raise) 78%, transparent);
+  --card:   color-mix(in srgb, var(--raised) 82%, transparent);
+  --chip:   color-mix(in srgb, var(--raised) 72%, transparent);
+  --well:   color-mix(in srgb, var(--bg) 70%, transparent);
+  --rim:    rgba(255, 255, 255, .12);
+  --sheen:  rgba(255, 255, 255, .08);
+  --spec:   rgba(255, 255, 255, .55);
+  --lift:   0 14px 34px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
+  --acc-text: color-mix(in srgb, var(--accent) 78%, #fff);
+  --warn-text: color-mix(in srgb, var(--yellow) 70%, #fff);
+}
+/* Under a photograph the sheets take a floor, as RAGX's do, so small text stays readable. */
+:root[data-wallpaper] { --sheet: color-mix(in srgb, var(--raise) 66%, transparent); }
+:root[data-wallpaper][data-theme="dark"] { --sheet: color-mix(in srgb, var(--raise) 74%, transparent); }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
-  background: var(--bg); color: var(--fg);
+  color: var(--fg);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   display: flex; flex-direction: column; overflow: hidden;
+  padding: 10px; gap: 10px;
+  /* The ground: the wallpaper when ter-manager has one (wallpaper.js puts it
+   * on body), else a colour mesh mixed from the palette, fixed so it does not
+   * swim while a sheet scrolls. */
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(58% 52% at 14% 16%, color-mix(in srgb, var(--accent) 20%, transparent) 0%, transparent 68%),
+    radial-gradient(52% 48% at 86% 14%, color-mix(in srgb, var(--yellow) 14%, transparent) 0%, transparent 66%),
+    radial-gradient(60% 55% at 78% 84%, color-mix(in srgb, var(--green) 13%, transparent) 0%, transparent 70%),
+    radial-gradient(54% 50% at 22% 88%, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 68%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
 }
+:root[data-wallpaper] body { background-size: cover; background-position: center; }
+
 button, input { font: inherit; color: inherit; }
 button {
-  background: var(--raise); border: 1px solid var(--line); border-radius: 6px;
-  padding: 5px 11px; cursor: pointer;
+  background: var(--chip); border: 1px solid var(--line); border-radius: var(--r-card);
+  padding: 6px 12px; min-height: 34px; cursor: pointer; box-shadow: inset 0 1px 0 var(--sheen);
 }
-button:hover { border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+button:hover { border-color: color-mix(in srgb, var(--fg) 26%, transparent); }
 button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--accent); color: var(--on-acc); border-color: transparent; }
+button.primary {
+  background: var(--accent); color: var(--on-acc); border-color: transparent; font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 6px 16px var(--acc-shadow);
+}
 button.danger { color: var(--red); }
-button.icon { border: none; background: none; padding: 2px 8px; font-size: 18px; line-height: 1; }
-button.link { border: none; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
-input { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+button.link { border: none; background: none; box-shadow: none; padding: 0; min-height: 0; color: var(--acc-text); text-decoration: underline; }
+.icon-btn { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; flex: none; }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.icon-btn svg circle { fill: currentColor; }
+input {
+  background: var(--well); border: 1px solid var(--line); border-radius: var(--r-card); padding: 7px 11px; min-height: 36px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .04);
+}
 input:focus, button:focus-visible { outline: 2px solid var(--acc-soft); outline-offset: 1px; border-color: var(--accent); }
 code, pre { font-family: var(--mono-font); font-size: 12.5px; }
 .note { color: var(--muted); font-size: 12.5px; }
 .bad { color: var(--red); }
+.eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .grow { flex: 1; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row.end { justify-content: flex-end; }
 .row input { flex: 1; min-width: 0; }
 [hidden] { display: none !important; }
 
-/* bar */
-.bar { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raise); }
-.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.status { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); flex: none; }
+/* The materials: the bar and the sheets, each blurred straight on the ground. */
+.bar {
+  background: var(--bar);
+  -webkit-backdrop-filter: var(--blur-bar); backdrop-filter: var(--blur-bar);
+  border: 1px solid var(--rim); border-radius: var(--r-sheet);
+  box-shadow: inset 0 1px 0 var(--spec), var(--lift);
+}
+.sheet, .center > .card {
+  background: var(--sheet);
+  -webkit-backdrop-filter: var(--blur-sheet); backdrop-filter: var(--blur-sheet);
+  border: 1px solid color-mix(in srgb, var(--rim) 70%, var(--line)); border-radius: var(--r-sheet);
+  box-shadow: inset 0 1px 0 var(--sheen), var(--lift);
+}
+/* No backdrop-filter at all: translucent fills would show the ground unblurred behind every line. Go solid. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bar, .sheet, .center > .card { background: var(--raise); }
+}
+
+/* the bar */
+.bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 10px 8px 16px; min-height: 54px; flex: none; }
+.brand { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; min-width: 0; }
+.brand svg { width: 19px; height: 19px; }
+.brand strong { font-size: 18px; letter-spacing: .2px; }
+.tag { padding: 2px 9px; border-radius: var(--r-chip); background: var(--chip); color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pill {
+  display: flex; align-items: center; gap: 8px; padding: 5px 14px; border-radius: 999px;
+  background: var(--chip); border: 1px solid var(--line); font-size: 13px; white-space: nowrap;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; }
 .dot.up { background: var(--green); }
 .dot.wait { background: var(--yellow); }
-#ws-label { max-width: 50ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-end { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1 1 220px; min-width: 0; }
+.bar-end button { white-space: nowrap; }
+.path {
+  min-width: 0; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+  padding: 5px 10px; border-radius: var(--r-card); background: var(--chip); color: var(--muted); font: 12px var(--mono-font);
+}
+.path:empty { display: none; }
 .menu { position: relative; }
 .popover {
-  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; min-width: 200px;
-  background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: 0 6px 24px color-mix(in srgb, var(--fg) 14%, transparent); padding: 4px; display: flex; flex-direction: column;
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; min-width: 210px; padding: 5px;
+  background: var(--raise); border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: var(--lift); display: flex; flex-direction: column; gap: 2px;
 }
-.popover button { border: none; text-align: left; }
+.popover button { border: none; box-shadow: none; background: none; text-align: left; border-radius: var(--r-chip); }
+.popover button:hover { background: var(--soft); }
 
 main { flex: 1; min-height: 0; display: flex; }
 .center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto; }
-.card { width: min(640px, 100%); background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
-.card h2 { margin: 0; font-size: 17px; }
-.card p { margin: 0; }
+.center > .card { width: min(640px, 100%); padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.center > .card h2 { margin: 0; font-size: 17px; }
+.center > .card p { margin: 0; }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; word-break: break-all; }
 
-/* browse: fabrics | places | the selected place */
-.browse { flex: 1; display: grid; grid-template-columns: 190px 320px minmax(0, 1fr); min-height: 0; }
-.col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
-.col.view { border-right: none; }
-.col-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); min-height: 42px; }
-.list, .tree { list-style: none; margin: 0; padding: 4px; overflow: auto; flex: 1; }
+/* browse: three sheets - canvases | places | the place */
+.browse { flex: 1; display: flex; gap: 10px; min-height: 0; }
+.sheet { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 12px; gap: 10px; }
+.fabrics { flex: 0 0 260px; }
+.places { flex: 0 0 380px; }
+.view { flex: 1 1 auto; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 0 6px; }
+.sheet-head .icon-btn { width: 30px; height: 30px; min-height: 0; border-radius: var(--r-chip); }
+
+.list, .tree { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .list button, .tree button {
-  width: 100%; text-align: left; border: none; background: none; border-radius: 6px; padding: 4px 8px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+  width: 100%; text-align: left; border: 1px solid transparent; background: none; box-shadow: none; min-height: 0;
+  border-radius: var(--r-card); padding: 7px 10px;
 }
 .list button:hover, .tree button:hover { background: var(--soft); }
-.list button.on, .tree button.on { background: var(--acc-soft); }
-.list .when { color: var(--muted); font-size: 11.5px; display: block; }
-.list .when.todo { color: var(--accent); }
-.places input { margin: 8px 8px 0; }
-.places .col-head button { padding: 3px 9px; font-size: 12.5px; }
-.reading-line { padding: 6px 12px; border-bottom: 1px solid var(--line); }
-/* The import line for ~/.claude/CLAUDE.md, selectable to copy. */
-.reading-line code.import { user-select: all; font-family: ui-monospace, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
-/* Keep in RAGX: a switch, lit while the canvas is kept in sync. */
-button.switch { margin-right: 6px; }
-button.switch::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }
+.list button.on { background: var(--acc-soft); border-color: var(--accent); }
+.tree button.on { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.list .name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list .when { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+.chip { padding: 0 7px; border-radius: var(--r-chip); background: var(--chip); color: var(--fg-2); font-size: 11px; font-weight: 600; line-height: 18px; white-space: nowrap; }
+.chip.acc { background: var(--acc-soft); color: var(--acc-text); }
+.chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+
+.title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 4px 0; }
+.title-row h1 { margin: 0; font-size: 19px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-row .note { text-align: right; }
+.switches { display: flex; flex-wrap: wrap; gap: 8px; }
+.switches button { font-size: 13px; }
+/* Rules canvas and Keep in RAGX: switches, lit while on. */
+button.switch { display: inline-flex; align-items: center; gap: 7px; }
+button.switch::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 button.switch[aria-checked="true"] { background: var(--acc-soft); border-color: var(--accent); }
 button.switch[aria-checked="true"]::before { background: var(--accent); }
-.list .kept { color: var(--accent); }
-.tree button { display: flex; align-items: baseline; gap: 6px; }
-.tree .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lines { display: flex; flex-direction: column; gap: 8px; }
+.lines:not(:has(.line-card:not([hidden]))) { display: none; }
+/* Sync, rules, Read images and agent scripts, each a nearly solid card. */
+.line-card { padding: 9px 12px; border-radius: var(--r-card); background: var(--card); color: var(--fg-2); line-height: 1.45; }
+.line-card.bad { color: var(--red); }
+.line-card code.import { user-select: all; font-size: 11px; overflow-wrap: anywhere; }
+.line-card .script { display: block; }
+.line-card .jump { color: var(--acc-text); cursor: pointer; text-decoration: underline; }
+.find { display: block; }
+.find input { width: 100%; }
+
+.tree button { display: flex; align-items: baseline; gap: 6px; padding: 5px 10px; font-size: 13.5px; }
+.tree .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tree .kind { color: var(--muted); font-size: 11.5px; flex: none; }
 /* A totem an agent wrote, and owns. */
-.tree .kind.agent { color: var(--accent); }
-.reading-line .script { display: block; }
-.reading-line .jump { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.tree .kind.agent { color: var(--acc-text); }
 .tree .count { color: var(--muted); font-size: 11.5px; margin-left: auto; flex: none; }
-.address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seg { display: flex; }
-.seg button { border-radius: 0; }
-.seg button:first-child { border-radius: 6px 0 0 6px; }
-.seg button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
-.seg button.on { background: var(--acc-soft); border-color: var(--accent); }
-.section, .doc { flex: 1; overflow: auto; margin: 0; padding: 12px 16px; white-space: pre-wrap; word-wrap: break-word; }
-.section .head { font-weight: 600; margin-bottom: 8px; }
-.section .jump { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+.view-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 2px 0 4px; }
+.address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.seg { display: flex; gap: 3px; padding: 3px; border-radius: var(--r-card); background: var(--chip); border: 1px solid var(--line); }
+.seg button { border: none; box-shadow: none; background: none; border-radius: var(--r-chip); min-height: 30px; padding: 0 14px; font-size: 13px; }
+.seg button.on { background: var(--fg); color: var(--bg); font-weight: 600; }
+.card { border-radius: var(--r-card); background: var(--card); }
+.section, .doc { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 16px 20px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.55; }
+.section .head { font-weight: 600; font-size: 16px; margin-bottom: 8px; }
+.section .jump { color: var(--acc-text); cursor: pointer; text-decoration: underline; }
 
 .toast {
-  position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 9;
-  background: var(--fg); color: var(--bg); padding: 7px 14px; border-radius: var(--radius); max-width: 80%;
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 9;
+  background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: var(--r-card); max-width: 80%; box-shadow: var(--lift);
 }
 .toast.bad { background: var(--red); color: #fff; }
 
-@media (max-width: 760px) {
-  .browse { grid-template-columns: 1fr; grid-auto-rows: minmax(160px, auto); overflow: auto; }
-  .col { border-right: none; border-bottom: 1px solid var(--line); }
+/* A narrow pane: the sheets stack and the page scrolls, as RAGX's does. */
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  .browse { flex-direction: column; }
+  .fabrics, .places, .view { flex: none; }
+  .fabrics .list { max-height: 220px; }
+  .places .tree { max-height: 320px; }
+  .view { min-height: 420px; }
 }
