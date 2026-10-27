@@ -49,6 +49,12 @@ const FORMAT = [
   '<Line from to> only draws a line between two boxes with File Fabric\'s Line tool - a drawing, not a connection; use it only when the user asks for a drawn line.',
   'Both name their boxes by name, by a path such as "Collect > Todo" when two share a name, or in an <Add> by a full address.',
   'Children stack top to bottom. Give no sizes or positions: NoteX lays everything out, in free space far from the other totems.',
+  // Stacked items made the user's totems thin and long; rows of three spread them across (t-657e827477, t-fd28968487).
+  'Stacked, a totem grows long: put a box\'s items - images, texts and notes in any mix - side by side in a <Row> of up to three, and a fourth below.',
+  // Four notes: the fourth goes under a shorter one, keeping reading order, so the row stays even (t-4aa052e2fc, t-db21733ba6).
+  'With four notes, stack the fourth in a <Column> under a shorter note of the three.',
+  // A note is at most 420 px, so lines broken by hand break again (t-c60e2fff9d).
+  'Write each note item as one whole line and let File Fabric wrap it: a note is at most 420 px wide, so a line broken by hand breaks again.',
   'Write < as &lt; and & as &amp; in text, or wrap text in <![CDATA[ ... ]]>. Two boxes side by side need different names.',
 ].join('\n');
 

@@ -73,6 +73,11 @@ test('three tools, the format taught in notex_write, and the rules-canvas rule',
     assert.match(write, /<Line from to> only draws a line/);
     assert.ok(write.includes('<Link from="Collect" to="Read"/>'));
     assert.match(write, /<Remove id=/);
+    // A box's items go in rows of up to three, a fourth below; note items are whole lines (t-657e827477, t-db21733ba6, t-c60e2fff9d).
+    assert.match(write, /side by side in a <Row> of up to three, and a fourth below/);
+    assert.match(write, /images, texts and notes in any mix/);
+    assert.match(write, /stack the fourth in a <Column> under a shorter note/);
+    assert.match(write, /Write each note item as one whole line/);
   } finally { m.close(); }
 });
 
