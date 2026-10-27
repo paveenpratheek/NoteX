@@ -188,6 +188,32 @@ test('Add and Edit are refused outside the agent\'s own totem', () => {
   assert.equal(out.boxes[0].address, 'Plan (totem) > Next');
 });
 
+test("keeping totems apart goes by File Fabric's chain box: a 'draw' record it never shows refuses nothing (t-2c4db2d540)", () => {
+  const plan = () => {
+    const s = sampleState();
+    layoutTotem(parseScript('<Canvas name="Thesis"><Totem name="Plan"><Area name="Top"><Text>first</Text></Area></Totem></Canvas>'), s, opts);
+    return s;
+  };
+  const add = (s) => layoutAdd(parseScript('<Add canvas="Thesis" at="Plan (totem)"><Area name="Next"><Text>more</Text></Area></Add>'), s, opts);
+  // Where Next lands, from a dry run.
+  const dry = plan();
+  add(dry);
+  const nb = box(dry, 'Next'), top = box(dry, 'Top');
+  const y = nb.maxY + 150;
+  assert.ok(y - top.maxY > 300, 'the stroke is past the chain of what the totem already holds');
+
+  // File Fabric's leftover from a drag in draw mode: start and end only, never drawn, never chained.
+  const s1 = plan();
+  s1.drawings.push({ id: 'GHOST', type: 'draw', start: { x: nb.minX, y }, end: { x: nb.maxX, y: y + 10 }, linkedTotemId: null, areaId: null });
+  add(s1);
+  assert.ok(box(s1, 'Next'), 'written beside the record');
+
+  // A pencil stroke there is the user's, File Fabric chains it, so the Add is still refused.
+  const s2 = plan();
+  s2.drawings.push({ id: 'PEN', type: 'path', points: [{ x: nb.minX, y }, { x: nb.maxX, y: y + 10 }], linkedTotemId: null, areaId: null });
+  assert.throws(() => add(s2), (e) => e instanceof Refusal && /within File Fabric's 300 px of/.test(e.message));
+});
+
 test('Edit: new words grow the boxes around them; a rename; a user-edited item is refused', () => {
   const state = sampleState();
   layoutTotem(parseScript('<Canvas name="Thesis"><Totem name="Plan"><Area name="Top"><Text>short</Text><Note name="Todo">- [ ] a</Note></Area></Totem></Canvas>'), state, opts);

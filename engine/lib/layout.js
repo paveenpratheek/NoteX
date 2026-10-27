@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildPlaces, kindOf } from './places.js';
-import { polygonsOf, bboxDistance, distToBBox } from './geometry.js';
+import { polygonsOf, bboxDistance, distToBBox, itemBBox } from './geometry.js';
 import { CHAIN, FIELD } from './rules.js';
 import { M, measureText, measureNote, fileSize, imageSize, imageShown, isImageName, isPdfName, visualBox, textOf } from './measure.js';
 import { checkCanvas, overlapsOf } from './check.js';
@@ -212,17 +212,20 @@ export function settle(scene, e, old, opts, touched) {
 /* What an agent's totem grew into must stay clear of every other totem:
  * outside the 500 px field of another totem and the 300 px chain of its
  * items, so File Fabric never counts one totem's things as another's
- * (t-d65b7d40dc). */
+ * (t-d65b7d40dc). Measured with File Fabric's own chain box, not the drawn
+ * one: a 'draw' record File Fabric never shows has no chain box and joins
+ * nothing, so it must not refuse a script (t-2c4db2d540). */
 function keepApart(scene, totemId, ids, opts) {
   const mine = (e) => e.item.id === totemId || scene.totemOf(e)?.id === totemId;
   const others = scene.items.filter((e) => !mine(e));
+  const chainBox = (e) => (e.kind === 'totem' ? { minX: e.item.x, minY: e.item.y, maxX: e.item.x, maxY: e.item.y } : itemBBox(e.item));
   for (const id of ids) {
     const e = scene.byId.get(id);
     if (!e || !mine(e)) continue;
-    const b = scene.box(e);
+    const b = chainBox(e);
     if (!b) continue;
     for (const o of others) {
-      const ob = scene.box(o);
+      const ob = chainBox(o);
       if (!ob) continue;
       const close = o.kind === 'totem' ? distToBBox(o.item.x, o.item.y, b) <= FIELD : bboxDistance(b, ob) <= CHAIN;
       if (close) throw new Refusal(`it would bring ${describe(scene, e)} within File Fabric's ${o.kind === 'totem' ? `${FIELD} px field of` : `${CHAIN} px of`} ${describe(scene, o)}, outside this totem. NoteX never moves the user's items.`, opts.node);
