@@ -37,23 +37,23 @@ It runs as a page inside ter-manager (a desktop app that hosts plugins), as a co
 
 ```mermaid
 flowchart LR
-  FF["File Fabric / CanvasX\nfabric.json"]
+  FF["File Fabric / CanvasX<br/>fabric.json"]
 
   subgraph NoteX["NoteX engine (Node 24, zero dependencies)"]
-    PL["places\ncanvas → tree of places"] --> DOC["address document (.md)\n+ place map (.json)\n+ files list"]
-    SY["auto-sync\nwatch · wait for quiet"] --> PL
+    PL["places<br/>canvas → tree of places"] --> DOC["address document (.md)<br/>+ place map (.json)<br/>+ files list"]
+    SY["auto-sync<br/>watch · wait for quiet"] --> PL
     RU["rules canvas → rules.md"]
-    SC["script parser\nline/column errors"] --> LA["layout engine\nsizes · rows · free space"]
-    LA --> CK["overlap check"] --> WR["single writer\nqueue · lock · backup\nread-back · ledger"]
-    RO["readout\ncanvas → script with ids"]
+    SC["script parser<br/>line/column errors"] --> LA["layout engine<br/>sizes · rows · free space"]
+    LA --> CK["overlap check"] --> WR["single writer<br/>queue · lock · backup<br/>read-back · ledger"]
+    RO["readout<br/>canvas → script with ids"]
   end
 
   FF --> PL
   FF --> RO
   WR --> FF
-  DOC --> RAGX["RAGX\nembeds and searches"]
-  RU --> CL["~/.claude/CLAUDE.md\nimports the user's rules"]
-  AG["AI agents (MCP)\nnotex_canvases · notex_read · notex_write"] --> SC
+  DOC --> RAGX["RAGX<br/>embeds and searches"]
+  RU --> CL["~/.claude/CLAUDE.md<br/>imports the user's rules"]
+  AG["AI agents (MCP)<br/>notex_canvases · notex_read · notex_write"] --> SC
   RO --> AG
 ```
 
