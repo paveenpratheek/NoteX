@@ -2,6 +2,7 @@
   "name": "project-notex",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "The bridge from File Fabric to RAGX: fabrics in, documents that keep their place out",
   "type": "module",
   "engines": {
