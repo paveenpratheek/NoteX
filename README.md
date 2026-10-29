@@ -166,7 +166,7 @@ npm run notex -- serve --data-dir ./data                   # the page's engine o
 ```bash
 npm run notex -- plugin-setup     # once
 ```
-Then register the `plugin/` folder in ter-manager.
+Then register the `plugin/` folder in ter-manager. (ter-manager is not public yet; see *Runs inside ter-manager* below.)
 
 ### For Claude Code (MCP)
 ```bash
@@ -205,6 +205,8 @@ test/               node:test suites
 
 ## Runs inside ter-manager
 
+ter-manager is my own terminal and workspace manager that hosts plugins like this one; it is not public yet. Without it, everything still works from the command line: start the engine with `serve` and use the CLI or the MCP server.
+
 NoteX is a **ter-manager plugin**. Its page (`plugin/`) opens in ter-manager's sidebar as **NoteX — File Fabric as places**, and ter-manager gives it a data folder of its own. The page starts and stops the engine on `127.0.0.1:7781` itself. It talks to the engine through ter-manager's plugin protocol, and the engine accepts requests only from that page. The command line and the MCP server use the same engine, so the page, the terminal and AI agents all see the same data.
 
 ## GitX ready
@@ -212,7 +214,7 @@ NoteX is a **ter-manager plugin**. Its page (`plugin/`) opens in ter-manager's s
 This repository is set up for the **GitX workflow**, so any AI coding agent that opens it works the same disciplined way:
 
 - `AGENTS.md` holds the instructions once; `CLAUDE.md` and `GEMINI.md` import it, so **Claude Code** and **Google Antigravity** both follow it.
-- The `gitx-workflow` skill ships in `.claude/skills/` and `.agents/skills/`, and a hook in `.claude/settings.json` checks the workflow after every edit and at the end of each turn.
+- The `gitx-workflow` skill ships in `.claude/skills/` and `.agents/skills/`, and a hook in `.claude/settings.json` checks the workflow after every edit and at the end of each turn, when GitX is installed on the machine (without it, the hook stays silent).
 - Agents catch up on recorded decisions before changing anything, record new decisions, rejected alternatives and costs as they happen, cite them in code comments by id, and commit with GitX trailers (`GitX-Builds-On`, `GitX-Thoughts`, …).
 - Each commit message carries its GitX trailers, so the reasoning behind every change travels with the code; the full decision record stays private in `.gitx/`.
 
