@@ -18,6 +18,7 @@
   <div class="seg" id="views" role="group" aria-label="View" hidden>
     <button id="view-browse" class="on">Canvases</button>
     <button id="view-inbox">Inbox <span id="inbox-count" class="chip warn" hidden></span></button>
+    <button id="view-agents">Agent canvases</button>
   </div>
   <div class="pill" role="status"><span class="dot" id="dot" aria-hidden="true"></span><span id="status">Looking for the engine…</span></div>
   <div class="bar-end">
@@ -114,6 +115,28 @@
       <div class="note line-card" id="placer-line" hidden></div>
       <ul id="drop-list" class="drops"></ul>
     </div>
+  </section>
+
+  <section id="agents" class="agents" hidden>
+    <aside class="sheet fabrics" aria-label="Canvases and the agent">
+      <div class="sheet-head"><span class="eyebrow">Canvases</span><button id="agents-reload" class="icon-btn" aria-label="Look again" title="Look again"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button></div>
+      <ul id="agent-list" class="list"></ul>
+    </aside>
+    <article class="sheet agent-detail" aria-label="The canvas">
+      <div class="title-row"><h1 id="agent-title">Pick a canvas</h1><span class="note" id="agent-sub"></span></div>
+      <div class="switches">
+        <button id="assign-btn" class="switch" role="switch" aria-checked="false" hidden>Assigned to the agent</button>
+        <button id="render-btn" title="Draw this canvas again from its totem scripts" hidden>Draw again</button>
+      </div>
+      <p class="note" id="agent-help"></p>
+      <div id="agent-body" hidden>
+        <span class="eyebrow">Totem scripts</span>
+        <ul id="totem-list" class="totems"></ul>
+        <pre id="totem-script" class="doc card" hidden></pre>
+        <span class="eyebrow">Activity</span>
+        <ul id="activity-list" class="activity"></ul>
+      </div>
+    </article>
   </section>
 </main>
 

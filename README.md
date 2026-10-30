@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-121%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-122%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -115,7 +115,8 @@ Later scripts can change the agent's own work:
 - A drop waits until you pick a canvas assigned to the agent.
 - **Forget** removes a drop for good: from its totem scripts (and any link to its note), from the canvas, from its copy in `sources/`, from the backups that held it, from bronze and from RAGX. The erasure log keeps no content. Earlier script versions keep only its id.
 
-**Agent canvases** (assigned to the agent in CanvasX)
+**Agent canvases** (assigned to the agent in CanvasX, or from NoteX's Agent canvases view)
+- **The Agent canvases view** in ter-manager lists every canvas with whose it is and whether CanvasX has it open. From there you can assign an empty, closed canvas to the agent or take one back. For each agent canvas it shows the totem scripts (owner, earlier versions, drops, what the last render drew each from, errors, and the script itself), its activity, and a Draw again button.
 - The canvas is drawn from one totem script per totem. An agent changes a totem by sending its whole script again, and the new version is kept only if the canvas still draws with it. Every earlier version is kept, along with the last one that drew.
 - Totems stay where they were first placed; one that grows wider pushes the totems after it. A script that stops drawing is drawn from its last good version, so one broken totem never takes the others with it.
 - Scripts name Inbox drops by id, so the content stays in one place. A drop placed this way is marked placed.
@@ -148,7 +149,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 121, all passing, in ~2,600 lines |
+| Tests | 122, all passing, in ~2,650 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 

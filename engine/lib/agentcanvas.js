@@ -92,6 +92,70 @@ export class AgentCanvases {
   /* Every drop on the canvas now, with its address. */
   placedDrops(canvas) { return this.layout(canvas).totems.flatMap((t) => t.drops || []); }
 
+  /* ------------------------------------------------------------ activity */
+
+  /* What happened to an agent canvas, one line each, for the Agent
+   * canvases view (t-16d16a4f85); the newest 500 are kept. */
+  note(canvas, what, detail = {}) {
+    const file = path.join(this.dir(canvas), 'activity.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify({ at: new Date(this.now()).toISOString(), what, ...detail }) + '\n');
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    if (lines.length > 1000) fs.writeFileSync(file, lines.slice(-500).join('\n') + '\n');
+  }
+
+  activity(canvas, n = 50) {
+    let lines = [];
+    try { lines = fs.readFileSync(path.join(this.dir(canvas), 'activity.jsonl'), 'utf8').split('\n').filter(Boolean); } catch (_) { /* none yet */ }
+    return lines.slice(-n).reverse().map((l) => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
+  }
+
+  lastRender(canvas) {
+    try { return JSON.parse(fs.readFileSync(path.join(this.dir(canvas), 'last-render.json'), 'utf8')); } catch (_) { return null; }
+  }
+
+  /* Each totem's script with what the view shows of it: owner, versions
+   * kept, what the last render drew it from, its errors, its drops. */
+  totems(canvas) {
+    const last = this.lastRender(canvas);
+    return this.layout(canvas).totems.map((t) => {
+      let versions = 0;
+      try { versions = fs.readdirSync(path.join(this.dir(canvas), 'versions', t.file.replace(/\.totem$/, ''))).length; } catch (_) { /* none */ }
+      const r = last && last.totems.find((x) => x.totem === t.name);
+      return { name: t.name, owner: t.owner || null, script: this.read(canvas, t.file), versions, good: this.read(canvas, t.file, 'good') !== null,
+        drawn: r ? r.drawn : null, errors: r ? r.errors : [], drops: (t.drops || []).length };
+    });
+  }
+
+  /* --------------------------------------------------------- assignment */
+
+  /* The user assigns a canvas to the agent from NoteX, as from CanvasX: only
+   * an empty one, and not while CanvasX has it open - it learns of
+   * agent.json only when it opens a canvas (t-d798b625e5). */
+  assign(canvas, on) {
+    const dir = this.writer.canvasDir(canvas);
+    const file = path.join(dir, 'fabric.json');
+    if (!fs.existsSync(file)) throw new Refusal(`No canvas ${canvas} in the workspace.`);
+    if (!on) {
+      if (!isAgentCanvas(dir)) return false;
+      fs.rmSync(path.join(dir, 'agent.json'));
+      this.note(canvas, 'taken back');
+      return true;
+    }
+    if (isAgentCanvas(dir)) return false;
+    if (this.writer.isOpen(dir)) throw new Refusal(`${canvas} is open in CanvasX - close it there first, so CanvasX does not keep saving it.`);
+    let empty = false;
+    try {
+      const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const d = s.data ? s.data : s;
+      empty = ['drawings', 'areas', 'files', 'links', 'totems', 'tables', 'sidebarWidgets'].every((k) => !(d[k] && d[k].length));
+    } catch (_) { /* unreadable is not known to be empty */ }
+    if (!empty) throw new Refusal(`${canvas} already holds items, so it cannot be assigned to the agent: NoteX would draw over them from the agent's scripts. Create a new canvas in CanvasX for the agent instead.`);
+    fs.writeFileSync(path.join(dir, 'agent.json'), JSON.stringify({ assignedAt: new Date(this.now()).toISOString(), by: 'NoteX' }, null, 2));
+    this.note(canvas, 'assigned');
+    return true;
+  }
+
   /* A forgotten drop out of every script that names it, now and its good
    * copy; earlier versions keep only its id and stay as they are
    * (t-983bfb918b). The totems changed, by name. */
@@ -265,6 +329,9 @@ export class AgentCanvases {
     }
     const left = built.totems.filter((t) => t.drawn !== 'current' && t.drawn !== 'new');
     if (left.length) this.log(`${canvas}: ${left.map((t) => `${t.totem} drawn from ${t.drawn === 'good' ? 'its last good script' : 'nothing'}`).join('; ')}.`);
+    const totemsSaid = built.totems.map(({ totem, drawn, errors }) => ({ totem, drawn, errors }));
+    fs.writeFileSync(path.join(dir, 'last-render.json'), JSON.stringify({ at: new Date(this.now()).toISOString(), totems: totemsSaid, placed: [...new Set(built.placed)] }, null, 2));
+    this.note(canvas, 'render', { totems: totemsSaid.map((t) => `${t.totem}: ${t.drawn}`), placed: [...new Set(built.placed)] });
     // What is on the canvas now goes on to RAGX (t-7513cdd783).
     if (this.onRendered) this.onRendered(canvas);
     return { ...result.report, totems: built.totems, placed: [...new Set(built.placed)] };
@@ -272,20 +339,25 @@ export class AgentCanvases {
 
   /* A script the writer queued for an agent canvas. true when finished. */
   apply(entry) {
+    // Every script that reaches an agent canvas is in its activity, kept or not (t-16d16a4f85).
+    const finish = (status, result) => {
+      this.note(entry.canvas, 'script', { status, owner: entry.owner, change: entry.what, message: status === 'written' ? null : result.message || null });
+      return this.writer.finish(entry, status, result);
+    };
     const parsed = parseScript(entry.script);
     if (parsed.kind !== 'totem') {
       const tag = parsed.kind === 'add' ? '<Add>' : '<Edit> and <Remove>';
-      return this.writer.finish(entry, 'refused', { message: `${entry.canvas} is an agent canvas, drawn from whole totem scripts - ${tag} cannot change it. Read the totem's script, change it, and send the whole <Totem> script again; it replaces the old one.` });
+      return finish('refused', { message: `${entry.canvas} is an agent canvas, drawn from whole totem scripts - ${tag} cannot change it. Read the totem's script, change it, and send the whole <Totem> script again; it replaces the old one.` });
     }
     try {
       const r = this.render(entry.canvas, { override: { name: parsed.totem.attrs.name, script: entry.script, owner: entry.owner } });
       if (r === null) return false;
-      return this.writer.finish(entry, 'written', r);
+      return finish('written', r);
     } catch (e) {
-      if (e instanceof Refusal || e instanceof ScriptError) return this.writer.finish(entry, 'refused', { message: e.message, line: e.line || null });
+      if (e instanceof Refusal || e instanceof ScriptError) return finish('refused', { message: e.message, line: e.line || null });
       if (e instanceof FabricError && e.code === 'bad-json') return false;
       this.log(`Drawing ${entry.canvas} for ${entry.owner} failed: ${e.stack || e.message}`);
-      return this.writer.finish(entry, 'failed', { message: e.message });
+      return finish('failed', { message: e.message });
     }
   }
 }

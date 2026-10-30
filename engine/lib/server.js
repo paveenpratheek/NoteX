@@ -314,6 +314,37 @@ export async function startServer({
       const name = decodeURIComponent(p[0]);
       return json(200, { name, ...buildAndKeep(name), sync: sync.report()[name] || null, rules: rules.report() });
     }
+    /* The Agent canvases view: every canvas, whose it is and whether CanvasX
+     * has it open; an agent canvas with its totem scripts and activity
+     * (t-a9a33794bd). */
+    if (m('GET', /^\/api\/agent-canvases$/)) {
+      const canvases = listFabrics(needWorkspace()).map(({ name, dir: fdir, modified }) => {
+        const mine = isAgentCanvas(fdir);
+        const totems = mine ? agent.totems(name) : [];
+        const last = mine ? agent.lastRender(name) : null;
+        return { name, modified, agent: mine, open: writer.isOpen(fdir), totems: totems.length,
+          drops: totems.reduce((n, t) => n + t.drops, 0), lastRender: last ? last.at : null,
+          trouble: totems.filter((t) => t.drawn === 'good' || t.drawn === 'none').length };
+      });
+      return json(200, { workspace: needWorkspace(), canvases, placer: placer.report() });
+    }
+    if ((p = m('GET', /^\/api\/agent-canvases\/([^/]+)$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
+      const mine = isAgentCanvas(fdir);
+      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name) });
+    }
+    /* Assign a canvas to the agent, or take it back (t-d798b625e5). */
+    if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/agent$/))) {
+      const name = decodeURIComponent(p[0]);
+      fabricDir(needWorkspace(), name);
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
+      // An agent canvas reaches RAGX as its drops, so it is not also kept in sync (t-083eed1f9f).
+      if (on && config.sync && config.sync[name]) sync.set(name, false);
+      return json(200, { name, agent: on, changed: agent.assign(name, on) });
+    }
     /* An agent canvas drawn again from its scripts, e.g. after a script file was mended by hand. */
     if ((p = m('POST', /^\/api\/fabrics\/([^/]+)\/render$/))) {
       const name = decodeURIComponent(p[0]);

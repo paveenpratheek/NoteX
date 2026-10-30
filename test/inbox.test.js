@@ -119,6 +119,43 @@ test('an agent canvas is written by whole totem scripts, read back as its script
   assert.equal((await call('POST', '/api/fabrics/Notes/render')).status, 409);
 });
 
+test('the Agent canvases view: every canvas, an agent canvas\'s scripts and activity, and assigning (t-a9a33794bd, t-d798b625e5, t-16d16a4f85)', async () => {
+  const list = (await call('GET', '/api/agent-canvases')).body.canvases;
+  const harness = list.find((c) => c.name === 'Harness');
+  assert.equal(harness.agent, true);
+  assert.equal(harness.totems, 1);
+  assert.equal(list.find((c) => c.name === 'Notes').agent, false);
+
+  const one = (await call('GET', '/api/agent-canvases/Harness')).body;
+  assert.equal(one.totems[0].name, 'RAGX');
+  assert.equal(one.totems[0].drawn, 'current');
+  assert.equal(one.totems[0].drops, 1);
+  assert.match(one.totems[0].script, /<Totem name="RAGX">/);
+  const kinds = one.activity.map((a) => a.what);
+  assert.ok(kinds.includes('render') && kinds.includes('script'));
+  assert.equal(one.activity.find((a) => a.what === 'script').change, 'totem RAGX');
+  assert.equal((await call('GET', '/api/agent-canvases/Nowhere')).status, 404);
+
+  // Notes is empty: it can be assigned, and taken back - but not while CanvasX has it open.
+  const lock = path.join(workspace, 'Notes', '.fabric_lock');
+  fs.writeFileSync(lock, JSON.stringify({ timestamp: Date.now(), pid: 'tab' }));
+  const open = await call('PUT', '/api/fabrics/Notes/agent', { body: { on: true } });
+  assert.equal(open.status, 409);
+  assert.match(open.body.error.message, /open in CanvasX/);
+  fs.rmSync(lock);
+  assert.equal((await call('PUT', '/api/fabrics/Notes/agent', { body: { on: true } })).body.changed, true);
+  assert.ok(fs.existsSync(path.join(workspace, 'Notes', 'agent.json')));
+  assert.deepEqual((await call('GET', '/api/agent-canvases/Notes')).body.activity.map((a) => a.what), ['assigned']);
+  assert.equal((await call('PUT', '/api/fabrics/Notes/agent', { body: { on: false } })).body.changed, true);
+  assert.ok(!fs.existsSync(path.join(workspace, 'Notes', 'agent.json')));
+  // A canvas holding anything is refused.
+  fs.writeFileSync(path.join(workspace, 'Notes', 'fabric.json'), JSON.stringify({ areas: [{ id: 'a', name: 'Mine', polygons: [] }], drawings: [], files: [], links: [], totems: [] }));
+  const full = await call('PUT', '/api/fabrics/Notes/agent', { body: { on: true } });
+  assert.equal(full.status, 409);
+  assert.match(full.body.error.message, /already holds items/);
+  fs.writeFileSync(path.join(workspace, 'Notes', 'fabric.json'), JSON.stringify({ areas: [], drawings: [], files: [], links: [], totems: [] }));
+});
+
 test('placing is switched on and off from the page, and kept in the config', async () => {
   assert.equal((await call('PUT', '/api/placer', { body: { on: 'yes' } })).status, 400);
   const r = await call('PUT', '/api/placer', { body: { on: false } });

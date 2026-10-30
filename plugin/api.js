@@ -83,4 +83,8 @@ export class Engine {
   chooseCanvas(id, canvas) { return this.json('PUT', `/api/inbox/${encodeURIComponent(id)}/canvas`, { canvas }); }
   forgetDrop(id) { return this.json('POST', `/api/inbox/${encodeURIComponent(id)}/forget`); }
   setPlacing(on) { return this.json('PUT', '/api/placer', { on }); }
+  agentCanvases() { return this.json('GET', '/api/agent-canvases'); }
+  agentCanvas(name) { return this.json('GET', `/api/agent-canvases/${encodeURIComponent(name)}`); }
+  setAgent(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/agent`, { on }); }
+  render(name) { return this.json('POST', `/api/fabrics/${encodeURIComponent(name)}/render`); }
 }

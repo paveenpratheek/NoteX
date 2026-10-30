@@ -55,5 +55,7 @@ export async function forgetDrop(id, { bronze, writer, agent, dataDir }) {
   }
   if (d.kind === 'image') report.reading = new Readings(dataDir).delete(path.basename(file).replace(/\.[^.]+$/, ''));
   report.blob = bronze.forget(id).blob;
+  // By its id only: the activity keeps nothing of what was forgotten.
+  if (fabricDir && isAgentCanvas(fabricDir)) agent.note(d.canvas, 'forgot', { drop: id });
   return report;
 }

@@ -69,18 +69,21 @@ function setStatus(kind, text) {
 }
 
 function show(which) {
-  for (const id of ['offline', 'workspace', 'browse', 'inbox']) $(id).hidden = id !== which;
-  $('views').hidden = which !== 'browse' && which !== 'inbox';
+  for (const id of ['offline', 'workspace', 'browse', 'inbox', 'agents']) $(id).hidden = id !== which;
+  $('views').hidden = !['browse', 'inbox', 'agents'].includes(which);
 }
 
-/* Canvases or the Inbox, switched from the bar and remembered. */
+const TABS = ['browse', 'inbox', 'agents'];
+const markTab = (tab) => { for (const t of TABS) $(`view-${t}`).classList.toggle('on', t === tab); };
+
+/* Canvases, the Inbox or Agent canvases, switched from the bar and remembered. */
 async function showTab(tab) {
   S.tab = tab;
   remember('tab', tab);
-  $('view-browse').classList.toggle('on', tab === 'browse');
-  $('view-inbox').classList.toggle('on', tab === 'inbox');
+  markTab(tab);
   show(tab);
   if (tab === 'inbox') await loadInbox();
+  else if (tab === 'agents') await loadAgents();
   else if (!S.fabrics.length) await loadFabrics();
 }
 
@@ -115,6 +118,7 @@ async function refresh() {
   $('inbox-count').textContent = String(waitingDrops);
   $('inbox-count').title = `${waitingDrops} drop${waitingDrops === 1 ? '' : 's'} waiting for a canvas`;
   if (S.tab === 'inbox') { show('inbox'); await loadInbox(); return; }
+  if (S.tab === 'agents') { show('agents'); await loadAgents(); return; }
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
   else if (S.built) { renderSync((st.sync && st.sync[S.fabric]) || null); renderRules(st.rules); renderScripts(); } // a save in File Fabric starts a sync
@@ -587,6 +591,98 @@ async function keepText() {
   refresh();
 }
 
+/* ---------------------------------------------------- agent canvases */
+
+/* ter-manager's view of CanvasX: every canvas, whose it is, whether CanvasX
+ * has it open; an agent canvas's totem scripts and what happened to it
+ * (t-a9a33794bd). CanvasX itself stays the app canvases are drawn in. */
+const DRAWN = { new: 'drawn from its script', current: 'drawn from its script', good: 'drawn from its last good script', none: 'left out' };
+
+async function loadAgents() {
+  let r;
+  try { r = await engine.agentCanvases(); } catch (e) { toast(e.message, true); return; }
+  const ul = $('agent-list');
+  ul.replaceChildren();
+  for (const c of r.canvases) {
+    const b = el('button', null);
+    b.dataset.name = c.name;
+    const when = el('span', 'when', `saved ${c.modified.slice(0, 10)}`);
+    const chip = (text, kind = '') => when.append(el('span', `chip ${kind}`.trim(), text));
+    if (c.agent) chip(`Agent · ${c.totems} totem${c.totems === 1 ? '' : 's'}`, 'acc');
+    if (c.trouble) chip(`${c.trouble} not drawn as sent`, 'warn');
+    if (c.open) chip('open in CanvasX');
+    b.append(el('span', 'name', c.name), when);
+    b.addEventListener('click', () => openAgentCanvas(c.name));
+    const li = el('li', null);
+    li.append(b);
+    ul.append(li);
+  }
+  const pick = r.canvases.find((c) => c.name === S.agentCanvas) || r.canvases.find((c) => c.agent) || r.canvases[0];
+  if (pick) await openAgentCanvas(pick.name);
+}
+
+async function openAgentCanvas(name) {
+  S.agentCanvas = name;
+  for (const b of $('agent-list').querySelectorAll('button')) b.classList.toggle('on', b.dataset.name === name);
+  let c;
+  try { c = await engine.agentCanvas(name); } catch (e) { toast(e.message, true); return; }
+  $('agent-title').textContent = name;
+  $('agent-sub').textContent = c.agent ? `${c.totems.length} totem${c.totems.length === 1 ? '' : 's'}${c.lastRender ? ` · drawn ${ago(c.lastRender.at)}` : ''}` : 'your canvas';
+  const assign = $('assign-btn');
+  assign.hidden = false;
+  assign.setAttribute('aria-checked', String(c.agent));
+  assign.title = c.agent ? 'Take it back: it becomes your canvas again, holding what NoteX last drew' : 'Assign it to the agent: NoteX draws it from the agent\'s scripts, and CanvasX shows it view-only';
+  $('render-btn').hidden = !c.agent;
+  $('agent-help').textContent = c.agent
+    ? 'NoteX draws this canvas from the scripts below; CanvasX shows it view-only. Drops you send it from the Inbox are placed into these scripts.'
+    : `Only an empty canvas can be assigned, and not while CanvasX has it open${c.open ? ' - it is open now' : ''}. Make a new canvas in CanvasX for the agent.`;
+  $('agent-body').hidden = !c.agent && !c.activity.length;
+  const ul = $('totem-list');
+  ul.replaceChildren();
+  $('totem-script').hidden = true;
+  if (c.agent && !c.totems.length) ul.append(el('li', 'note', 'No totem scripts yet - the agent writes the first when it places a drop.'));
+  for (const t of c.totems) {
+    const li = el('li', 'totem card');
+    const top = el('div', 'top');
+    top.append(el('span', 'what', t.name), el('span', `chip ${t.drawn === 'good' || t.drawn === 'none' ? 'warn' : ''}`.trim(), DRAWN[t.drawn] || 'not drawn yet'));
+    const meta = el('div', 'meta');
+    meta.append(el('span', null, `${t.drops} drop${t.drops === 1 ? '' : 's'}`), el('span', null, `${t.versions} earlier version${t.versions === 1 ? '' : 's'}`));
+    if (t.owner) meta.append(el('span', null, `by ${t.owner}`));
+    li.append(top, meta);
+    for (const err of t.errors) li.append(el('div', 'bad', err));
+    li.addEventListener('click', () => {
+      const pre = $('totem-script');
+      const same = !pre.hidden && pre.dataset.totem === t.name;
+      pre.hidden = same;
+      pre.dataset.totem = t.name;
+      pre.textContent = t.script || '(no script file)';
+    });
+    ul.append(li);
+  }
+  const act = $('activity-list');
+  act.replaceChildren();
+  if (!c.activity.length) act.append(el('li', 'note', 'Nothing has happened here yet.'));
+  for (const a of c.activity) {
+    const say = a.what === 'script' ? `${a.change} from ${a.owner}: ${a.status === 'written' ? 'kept' : a.status}${a.message ? ` - ${a.message}` : ''}`
+      : a.what === 'render' ? `Drawn - ${a.totems.join(', ') || 'no totems'}${a.placed && a.placed.length ? ` · placed ${a.placed.length}` : ''}`
+        : a.what === 'forgot' ? `Forgot drop ${a.drop}` : a.what === 'assigned' ? 'Assigned to the agent' : a.what === 'taken back' ? 'Taken back from the agent' : a.what;
+    const li = el('li', a.status && a.status !== 'written' ? 'bad' : null);
+    li.append(el('span', 'when', ago(a.at)), el('span', null, say));
+    act.append(li);
+  }
+}
+
+async function toggleAssign() {
+  const name = S.agentCanvas;
+  const on = $('assign-btn').getAttribute('aria-checked') !== 'true';
+  if (!on && !window.confirm(`Take ${name} back from the agent? It becomes your canvas again, holding what NoteX last drew, and NoteX stops drawing it.`)) return;
+  try { await engine.setAgent(name, on); toast(on ? `${name} is the agent's now.` : `${name} is yours again.`); await loadAgents(); } catch (e) { toast(e.message, true); }
+}
+
+async function drawAgain() {
+  try { const r = await engine.render(S.agentCanvas); toast(`Drawn: ${r.totems.length} totem${r.totems.length === 1 ? '' : 's'}.`); await openAgentCanvas(S.agentCanvas); } catch (e) { toast(e.message, true); }
+}
+
 async function setRagxFolder() {
   $('menu').hidden = true;
   const now = S.state && S.state.ragx;
@@ -631,6 +727,10 @@ $('show-place').addEventListener('click', () => showView('place'));
 $('show-doc').addEventListener('click', () => showView('doc'));
 $('view-browse').addEventListener('click', () => showTab('browse'));
 $('view-inbox').addEventListener('click', () => showTab('inbox'));
+$('view-agents').addEventListener('click', () => showTab('agents'));
+$('agents-reload').addEventListener('click', loadAgents);
+$('assign-btn').addEventListener('click', toggleAssign);
+$('render-btn').addEventListener('click', drawAgain);
 $('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; keepFiles(files); });
 $('drop-keep').addEventListener('click', keepText);
 $('placing-btn').addEventListener('click', togglePlacing);
@@ -648,9 +748,9 @@ document.addEventListener('drop', (e) => e.preventDefault());
   if (TM && TM.ready) { try { await TM.ready; } catch (_) {} }
   try { S.dataDir = (await hostCall('host.dataDir')).dir; } catch (_) { S.dataDir = null; }
   S.local = await engine.local();
-  S.tab = (await recall('tab', 'browse')) === 'inbox' ? 'inbox' : 'browse';
-  $('view-browse').classList.toggle('on', S.tab === 'browse');
-  $('view-inbox').classList.toggle('on', S.tab === 'inbox');
+  const tab = await recall('tab', 'browse');
+  S.tab = TABS.includes(tab) ? tab : 'browse';
+  markTab(S.tab);
   await refresh();
   schedule();
 })();

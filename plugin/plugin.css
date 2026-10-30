@@ -268,6 +268,23 @@ button.switch[aria-checked="true"]::before { background: var(--accent); }
 .drop .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .drop .acts select, .drop .acts button { min-height: 28px; font-size: 12.5px; padding-top: 2px; padding-bottom: 2px; }
 
+/* agent canvases: the canvases | one canvas's scripts and activity */
+.agents { flex: 1; display: flex; gap: 10px; min-height: 0; }
+.agent-detail { flex: 1 1 auto; overflow: auto; }
+#agent-body { display: flex; flex-direction: column; gap: 8px; }
+#agent-body:not([hidden]) { display: flex; }
+.totems, .activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.totem { padding: 9px 12px; cursor: pointer; }
+.totem:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+.totem .top { display: flex; align-items: baseline; gap: 8px; }
+.totem .what { font-weight: 600; }
+.totem .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 3px; color: var(--muted); font-size: 11.5px; }
+.totem .bad { font-size: 12px; margin-top: 4px; }
+#totem-script { max-height: 320px; font-size: 12px; }
+.activity li { display: flex; gap: 10px; font-size: 12.5px; color: var(--fg-2); }
+.activity li.bad { color: var(--red); }
+.activity .when { flex: 0 0 72px; color: var(--muted); }
+
 .toast {
   position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 9;
   background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: var(--r-card); max-width: 80%; box-shadow: var(--lift);
@@ -277,7 +294,7 @@ button.switch[aria-checked="true"]::before { background: var(--accent); }
 /* A narrow pane: the sheets stack and the page scrolls, as RAGX's does. */
 @media (max-width: 900px) {
   body { overflow: auto; }
-  .browse, .inbox { flex-direction: column; }
+  .browse, .inbox, .agents { flex-direction: column; }
   .drop-sheet, .drops-sheet { flex: none; }
   .fabrics, .places, .view { flex: none; }
   .fabrics .list { max-height: 220px; }
