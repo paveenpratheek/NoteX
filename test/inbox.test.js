@@ -92,7 +92,8 @@ test('a drop forgotten from the page is gone for good', async () => {
   const before = (await call('GET', '/api/inbox')).body.drops;
   const pdf = before.find((d) => d.kind === 'pdf');
   const r = await call('POST', `/api/inbox/${pdf.id}/forget`);
-  assert.deepEqual(r.body, { id: pdf.id, blob: 'deleted' });
+  assert.equal(r.body.id, pdf.id);
+  assert.equal(r.body.blob, 'deleted');
   const after = (await call('GET', '/api/inbox')).body.drops;
   assert.equal(after.length, before.length - 1);
   assert.ok(!fs.readFileSync(path.join(data, 'bronze', 'drops.jsonl'), 'utf8').includes('Lit survey'));

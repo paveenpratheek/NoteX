@@ -41,6 +41,7 @@ import { AgentCanvases, isAgentCanvas } from './agentcanvas.js';
 import { Refusal } from './layout.js';
 import { Placer } from './placer.js';
 import { DropSync } from './dropsync.js';
+import { forgetDrop } from './forget.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -59,7 +60,7 @@ class HttpError extends Error {
 
 function statusOf(e) {
   if (e instanceof HttpError) return e.status;
-  if (e instanceof BronzeError) return e.code === 'no-drop' ? 404 : e.code === 'placed' ? 409 : 400;
+  if (e instanceof BronzeError) return e.code === 'no-drop' ? 404 : ['placed', 'placing', 'busy'].includes(e.code) ? 409 : 400;
   if (e instanceof Refusal) return 409;
   if (e instanceof FabricError) return e.code === 'not-found' || e.code === 'no-workspace' ? 404 : e.code === 'bad-json' ? 409 : 500;
   if (e instanceof RagxError) return 503;
@@ -242,7 +243,8 @@ export async function startServer({
       if (typeof canvas !== 'string' || !canvas) throw new HttpError(400, 'bad-body', 'Send {"canvas": "<an agent canvas>"}.');
       return json(200, { drop: shown(bronze.choose(p[0], agentCanvas(canvas))) });
     }
-    if ((p = m('POST', /^\/api\/inbox\/(d-[0-9a-f]{10})\/forget$/))) return json(200, bronze.forget(p[0]));
+    // Out of its scripts, the canvas, backups, RAGX and bronze (t-985017e732).
+    if ((p = m('POST', /^\/api\/inbox\/(d-[0-9a-f]{10})\/forget$/))) return json(200, await forgetDrop(p[0], { bronze, writer, agent, dataDir: dir }));
     if (m('PUT', /^\/api\/ragx$/)) {
       const body = await readJson(req);
       const folder = typeof body.path === 'string' ? body.path.trim().replace(/^"(.*)"$/, '$1') : '';

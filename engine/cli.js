@@ -15,6 +15,8 @@ import { Writer } from './lib/writer.js';
 import { AgentCanvases } from './lib/agentcanvas.js';
 import { Refusal } from './lib/layout.js';
 import { Placer } from './lib/placer.js';
+import { DropSync } from './lib/dropsync.js';
+import { forgetDrop } from './lib/forget.js';
 
 const USAGE = `usage: node engine/cli.js <command>
 
@@ -35,7 +37,7 @@ const USAGE = `usage: node engine/cli.js <command>
                           with no --canvas it waits for one
   drops --data-dir <folder>       the inbox, newest first
   forget <drop id> --data-dir <folder>
-                          remove a drop from the inbox for good
+                          remove a drop from the inbox, its canvas and RAGX for good
   render <canvas> --data-dir <folder>
                           draw an agent canvas again from its totem scripts
   place --data-dir <folder> [--model sonnet]
@@ -128,7 +130,7 @@ async function main(argv) {
       console.log('  Ctrl+C stops it; closing the plugin does not.');
       return null;
     }
-    case 'drop': case 'drops': case 'forget': {
+    case 'drop': case 'drops': {
       if (!opts['data-dir']) throw new UsageError('Give the folder NoteX keeps the inbox in: --data-dir <folder>');
       const bronze = new Bronze(opts['data-dir']);
       const line = (d) => `${d.id}  ${d.landedAt.slice(0, 16).replace('T', ' ')}  ${d.kind.padEnd(5)}  ${d.status.padEnd(7)}  ${(d.canvas || '-').padEnd(14)}  ${d.name || '(typed text)'}`;
@@ -138,20 +140,15 @@ async function main(argv) {
         for (const d of all) console.log(line(d));
         return 0;
       }
-      if (command === 'forget') {
-        if (!rest[0]) throw new UsageError('forget needs the drop id (see drops).');
-        const r = bronze.forget(rest[0]);
-        console.log(`Forgot ${r.id}${r.blob === 'shared' ? '; its content stays for another drop of the same file' : ''}.`);
-        return 0;
-      }
       const common = { canvas: opts.canvas || null, note: opts.note || null, via: 'cli' };
       if (opts.text != null) { if (rest[0]) throw new UsageError('drop takes a file or --text, not both.'); console.log(line(bronze.land({ text: opts.text, ...common }))); return 0; }
       if (!rest[0]) throw new UsageError('drop needs a file, or --text "<words>".');
       console.log(line(bronze.land({ bytes: fs.readFileSync(rest[0]), name: rest[0], ...common })));
       return 0;
     }
-    case 'render': case 'place': {
+    case 'render': case 'place': case 'forget': {
       if (command === 'render' && !rest[0]) throw new UsageError('render needs the agent canvas\'s name.');
+      if (command === 'forget' && !rest[0]) throw new UsageError('forget needs the drop id (see drops).');
       if (!opts['data-dir']) throw new UsageError('Give NoteX\'s data folder, which knows the workspace: --data-dir <folder>');
       let config = {};
       try { config = JSON.parse(fs.readFileSync(path.join(opts['data-dir'], 'config.json'), 'utf8')); } catch (_) { /* no workspace yet */ }
@@ -159,6 +156,19 @@ async function main(argv) {
       const bronze = new Bronze(opts['data-dir']);
       const agent = new AgentCanvases({ dataDir: opts['data-dir'], writer, bronze, log: (m) => console.log(m) });
       writer.agent = agent;
+      if (command === 'forget') {
+        // The canvas is drawn without it, and its drop list goes to RAGX - now, or once RAGX runs.
+        const dropSync = new DropSync({ dataDir: opts['data-dir'], config, agent, bronze, log: (m) => console.log(m) });
+        let sent = Promise.resolve();
+        agent.onRendered = (c) => { sent = dropSync.queue(c); };
+        const r = await forgetDrop(rest[0], { bronze, writer, agent, dataDir: opts['data-dir'] });
+        await sent;
+        const bits = [r.totems.length ? `taken out of ${r.totems.join(', ')} on ${r.canvas}` : null, r.sources.length ? `its copy ${r.sources.join(', ')} deleted` : null,
+          r.backups ? `${r.backups} backup${r.backups === 1 ? '' : 's'} deleted` : null, r.reading ? 'its reading deleted' : null,
+          r.blob === 'shared' ? 'its content kept for another drop of the same file' : null].filter(Boolean);
+        console.log(`Forgot ${r.id}${bits.length ? `: ${bits.join('; ')}` : ''}.`);
+        return 0;
+      }
       if (command === 'place') {
         if (opts.model) config.placer = { ...(config.placer || {}), model: opts.model };
         const placer = new Placer({ config: { ...config, placing: true }, dataDir: opts['data-dir'], bronze, writer, log: (m) => console.log(m) });

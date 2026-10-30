@@ -538,9 +538,11 @@ function renderDrops() {
       acts.append(sel);
     }
     const forget = el('button', 'danger', 'Forget');
-    forget.title = 'Remove this drop from NoteX for good';
+    forget.title = 'Remove this drop for good: from the Inbox, its canvas and RAGX';
+    // Out of its scripts, the canvas, the backups, RAGX and bronze (t-985017e732).
     forget.addEventListener('click', async () => {
-      if (!window.confirm(`Forget ${d.name || 'this text'}? It is removed from NoteX for good.`)) return;
+      const where = d.status === 'placed' ? ` It comes off ${d.canvas} and out of RAGX too.` : '';
+      if (!window.confirm(`Forget ${d.name || 'this text'}? It is removed for good.${where}`)) return;
       try { await engine.forgetDrop(d.id); toast('Forgotten.'); await loadInbox(); refresh(); } catch (e) { toast(e.message, true); }
     });
     acts.append(forget);

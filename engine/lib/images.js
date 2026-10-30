@@ -45,6 +45,16 @@ export class Readings {
   get(key) { return this.map[key] || null; }
   put(key, r) {
     this.map[key] = { kind: r.kind || null, text: r.text || '', description: r.description || '', model: r.model || null, at: new Date().toISOString() };
+    this.save();
+  }
+  /* A forgotten image's reading goes with it (t-985017e732). */
+  delete(key) {
+    if (!(key in this.map)) return false;
+    delete this.map[key];
+    this.save();
+    return true;
+  }
+  save() {
     if (this.file) {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = this.file + '.tmp';

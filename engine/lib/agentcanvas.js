@@ -55,6 +55,26 @@ const KIND = { areas: 'area', drawings: 'drawing', files: 'file' };
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const union = (bs) => bs.filter(Boolean).reduce((u, b) => (u ? { minX: Math.min(u.minX, b.minX), minY: Math.min(u.minY, b.minY), maxX: Math.max(u.maxX, b.maxX), maxY: Math.max(u.maxY, b.maxY) } : { ...b }), null);
 
+/* A script with a forgotten drop taken out: the empty tag that names it, and
+ * any Line or Link to the note it was (t-985017e732). Attribute values may
+ * hold '>' (a wire's path), so tags are matched attribute by attribute. */
+const ATTRS = '(?:[^>"]|"[^"]*")*';
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function withoutDrop(text, id) {
+  const notes = [];
+  const tag = new RegExp(`<(Note|Text|File)\\b(${ATTRS})\\bdrop="${reEsc(id)}"(${ATTRS})(?:/>|>\\s*</\\1\\s*>)`, 'gi');
+  let out = text.replace(tag, (m, t, a, b) => {
+    const name = /\bname="([^"]*)"/.exec(a + b);
+    if (/^note$/i.test(t) && name) notes.push(name[1]);
+    return '';
+  });
+  for (const n of notes) {
+    const wire = new RegExp(`<(Line|Link)\\b${ATTRS}\\b(?:from|to)="(?:[^"]*>\\s*)?${reEsc(n)}"${ATTRS}(?:/>|>\\s*</\\1\\s*>)`, 'gi');
+    out = out.replace(wire, '');
+  }
+  return out;
+}
+
 /* A totem's file: its name made safe, with a hash so two names that make
  * the same safe name stay apart. */
 export function scriptFile(name) {
@@ -71,6 +91,22 @@ export class AgentCanvases {
 
   /* Every drop on the canvas now, with its address. */
   placedDrops(canvas) { return this.layout(canvas).totems.flatMap((t) => t.drops || []); }
+
+  /* A forgotten drop out of every script that names it, now and its good
+   * copy; earlier versions keep only its id and stay as they are
+   * (t-983bfb918b). The totems changed, by name. */
+  removeDrop(canvas, id) {
+    const changed = [];
+    for (const t of this.layout(canvas).totems) {
+      for (const which of ['current', 'good']) {
+        const text = this.read(canvas, t.file, which);
+        if (text == null || !text.includes(`drop="${id}"`)) continue;
+        fs.writeFileSync(path.join(this.dir(canvas), which === 'good' ? 'good' : '', t.file), withoutDrop(text, id));
+        if (!changed.includes(t.name)) changed.push(t.name);
+      }
+    }
+    return changed;
+  }
 
   dir(canvas) { return path.join(this.root, canvas); }
 

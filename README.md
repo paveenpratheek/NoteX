@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-116%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-121%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -112,7 +112,8 @@ Later scripts can change the agent's own work:
 
 **Inbox** (the first layer of the data pipeline, in progress)
 - Drop files (text, Markdown, PDF, Word, images) or type text on the page's Inbox, or use `npm run notex -- drop`. Each drop is checked to be what its name says and kept exactly as it arrived, stored once by its SHA-256.
-- A drop waits until you pick a canvas assigned to the agent. Forgetting a drop removes it for good, and the erasure log keeps no content.
+- A drop waits until you pick a canvas assigned to the agent.
+- **Forget** removes a drop for good: from its totem scripts (and any link to its note), from the canvas, from its copy in `sources/`, from the backups that held it, from bronze and from RAGX. The erasure log keeps no content. Earlier script versions keep only its id.
 
 **Agent canvases** (assigned to the agent in CanvasX)
 - The canvas is drawn from one totem script per totem. An agent changes a totem by sending its whole script again, and the new version is kept only if the canvas still draws with it. Every earlier version is kept, along with the last one that drew.
@@ -147,7 +148,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 116, all passing, in ~2,450 lines |
+| Tests | 121, all passing, in ~2,600 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 
@@ -210,6 +211,7 @@ engine/
     placer.js       the agent places queued drops, with Claude Code headless
     claude.js       runs Claude Code: no shell, no tools, no API keys
     dropsync.js     placed drops on to RAGX, each with its place and drop time
+    forget.js       a drop forgotten everywhere NoteX keeps it, and in RAGX
     script.js       totem script parser
     measure.js      sizes as File Fabric draws them
     layout.js       the layout engine
