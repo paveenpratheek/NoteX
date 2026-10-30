@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-76%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -136,7 +136,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 76, all passing, in ~1,700 lines |
+| Tests | 85, all passing, in ~1,850 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 
@@ -192,6 +192,7 @@ engine/
     images.js, read.js   image readings through RAGX
     sync.js         Keep in RAGX auto-sync
     agentrules.js   rules canvas → rules.md
+    bronze.js       the inbox: drops kept as they arrived, and forgotten on request
     script.js       totem script parser
     measure.js      sizes as File Fabric draws them
     layout.js       the layout engine

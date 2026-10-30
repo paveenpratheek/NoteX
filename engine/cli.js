@@ -10,6 +10,7 @@ import { buildFabric, startServer, writeBuilt as keepBuilt } from './lib/server.
 import { writeLocal, REPO } from './lib/lifecycle.js';
 import { readFabricImages } from './lib/read.js';
 import { RagxError } from './lib/ragx.js';
+import { Bronze, BronzeError } from './lib/bronze.js';
 
 const USAGE = `usage: node engine/cli.js <command>
 
@@ -24,7 +25,13 @@ const USAGE = `usage: node engine/cli.js <command>
   fabrics <workspace>     the fabrics in a workspace, newest first
   serve --data-dir <folder> [--port 7781] [--origin <url,url>] [--ragx <folder>]
                           run as the plugin's server on 127.0.0.1 (Ctrl+C stops it)
-  plugin-setup            once: tells the plugin where the engine is`;
+  plugin-setup            once: tells the plugin where the engine is
+  drop <file> | --text "<words>"  --data-dir <folder> [--canvas <name>] [--note "<words>"]
+                          keep a file or typed text in the inbox, as it is;
+                          with no --canvas it waits for one
+  drops --data-dir <folder>       the inbox, newest first
+  forget <drop id> --data-dir <folder>
+                          remove a drop from the inbox for good`;
 
 class UsageError extends Error {}
 
@@ -112,13 +119,35 @@ async function main(argv) {
       console.log('  Ctrl+C stops it; closing the plugin does not.');
       return null;
     }
+    case 'drop': case 'drops': case 'forget': {
+      if (!opts['data-dir']) throw new UsageError('Give the folder NoteX keeps the inbox in: --data-dir <folder>');
+      const bronze = new Bronze(opts['data-dir']);
+      const line = (d) => `${d.id}  ${d.landedAt.slice(0, 16).replace('T', ' ')}  ${d.kind.padEnd(5)}  ${d.status.padEnd(7)}  ${(d.canvas || '-').padEnd(14)}  ${d.name || '(typed text)'}`;
+      if (command === 'drops') {
+        const all = bronze.list();
+        if (!all.length) console.log('The inbox is empty.');
+        for (const d of all) console.log(line(d));
+        return 0;
+      }
+      if (command === 'forget') {
+        if (!rest[0]) throw new UsageError('forget needs the drop id (see drops).');
+        const r = bronze.forget(rest[0]);
+        console.log(`Forgot ${r.id}${r.blob === 'shared' ? '; its content stays for another drop of the same file' : ''}.`);
+        return 0;
+      }
+      const common = { canvas: opts.canvas || null, note: opts.note || null, via: 'cli' };
+      if (opts.text != null) { if (rest[0]) throw new UsageError('drop takes a file or --text, not both.'); console.log(line(bronze.land({ text: opts.text, ...common }))); return 0; }
+      if (!rest[0]) throw new UsageError('drop needs a file, or --text "<words>".');
+      console.log(line(bronze.land({ bytes: fs.readFileSync(rest[0]), name: rest[0], ...common })));
+      return 0;
+    }
     default:
       throw new UsageError(`Unknown command "${command}".\n\n${USAGE}`);
   }
 }
 
 main(process.argv.slice(2)).then((code) => { if (code !== null) process.exitCode = code; }, (e) => {
-  if (e instanceof UsageError || e instanceof FabricError || e instanceof RagxError) { console.error(e.message); process.exitCode = 2; return; }
+  if (e instanceof UsageError || e instanceof FabricError || e instanceof RagxError || e instanceof BronzeError) { console.error(e.message); process.exitCode = 2; return; }
   console.error(e.stack || e.message);
   process.exitCode = 1;
 });
