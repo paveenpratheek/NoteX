@@ -17,6 +17,7 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const S = {
   up: false, state: null, local: null, dataDir: null, startedAt: 0,
   fabrics: [], fabric: null, built: null, sections: new Map(), selected: null, view: 'place',
+  tab: 'browse', inbox: null,
 };
 
 /* ------------------------------------------------------------ the host */
@@ -68,7 +69,19 @@ function setStatus(kind, text) {
 }
 
 function show(which) {
-  for (const id of ['offline', 'workspace', 'browse']) $(id).hidden = id !== which;
+  for (const id of ['offline', 'workspace', 'browse', 'inbox']) $(id).hidden = id !== which;
+  $('views').hidden = which !== 'browse' && which !== 'inbox';
+}
+
+/* Canvases or the Inbox, switched from the bar and remembered. */
+async function showTab(tab) {
+  S.tab = tab;
+  remember('tab', tab);
+  $('view-browse').classList.toggle('on', tab === 'browse');
+  $('view-inbox').classList.toggle('on', tab === 'inbox');
+  show(tab);
+  if (tab === 'inbox') await loadInbox();
+  else if (!S.fabrics.length) await loadFabrics();
 }
 
 async function refresh() {
@@ -97,6 +110,11 @@ async function refresh() {
     return;
   }
   setStatus('up', `Engine running · ${st.fabrics} fabric${st.fabrics === 1 ? '' : 's'}`);
+  const waitingDrops = st.inbox ? st.inbox.waiting : 0;
+  $('inbox-count').hidden = !waitingDrops;
+  $('inbox-count').textContent = String(waitingDrops);
+  $('inbox-count').title = `${waitingDrops} drop${waitingDrops === 1 ? '' : 's'} waiting for a canvas`;
+  if (S.tab === 'inbox') { show('inbox'); await loadInbox(); return; }
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
   else if (S.built) { renderSync((st.sync && st.sync[S.fabric]) || null); renderRules(st.rules); renderScripts(); } // a save in File Fabric starts a sync
@@ -435,6 +453,113 @@ function renderScripts() {
   }
 }
 
+/* ------------------------------------------------------------- inbox */
+
+/* What the user drops is kept as it arrived until it goes to a canvas
+ * assigned to the agent - picked now or later (t-85f3ec23ef, t-0f32cb63f2).
+ * Only canvases CanvasX has assigned are offered (t-52f040cf72). */
+const KIND_LABEL = { text: 'Text', md: 'Markdown', pdf: 'PDF', docx: 'Word', image: 'Image' };
+const DROP_STATUS = { waiting: 'Waiting for a canvas', queued: 'Queued', placing: 'Being placed', placed: 'Placed', failed: 'Could not place' };
+
+function canvasSelect(sel, canvases, current, later) {
+  sel.replaceChildren();
+  if (later) sel.append(new Option(canvases.length ? 'Choose the canvas later' : 'No canvas is assigned to the agent yet', ''));
+  for (const c of canvases) sel.append(new Option(c, c));
+  sel.value = current && canvases.includes(current) ? current : '';
+  sel.disabled = !canvases.length;
+}
+
+async function loadInbox() {
+  let r;
+  try { r = await engine.inbox(); } catch (e) { toast(e.message, true); return; }
+  S.inbox = r;
+  const keep = $('drop-canvas').value;
+  canvasSelect($('drop-canvas'), r.canvases, keep, true);
+  $('drop-help').textContent = r.canvases.length
+    ? 'A drop with no canvas waits here; one with a canvas is queued for the agent to place.'
+    : 'Assign a canvas to the agent in CanvasX to send drops to it. Until then, everything you drop waits here, kept as it is.';
+  renderDrops();
+}
+
+function renderDrops() {
+  const { drops, canvases } = S.inbox;
+  const waitingN = drops.filter((d) => d.status === 'waiting').length;
+  $('drops-count').textContent = drops.length ? `${drops.length} drop${drops.length === 1 ? '' : 's'}${waitingN ? ` · ${waitingN} waiting` : ''}` : '';
+  const ul = $('drop-list');
+  ul.replaceChildren();
+  if (!drops.length) { ul.append(el('li', 'note empty', 'Nothing in the inbox yet.')); return; }
+  for (const d of drops) {
+    const li = el('li', 'drop card');
+    const top = el('div', 'top');
+    top.append(el('span', 'chip', KIND_LABEL[d.kind] || d.kind), el('span', 'what', d.name || d.preview || '(empty)'));
+    if (d.name && d.preview) top.title = d.preview;
+    const meta = el('div', 'meta');
+    meta.append(el('span', null, ago(d.landedAt)));
+    const kind = d.status === 'waiting' ? 'warn' : d.status === 'failed' ? 'bad' : d.status === 'placed' ? '' : 'acc';
+    meta.append(el('span', `chip ${kind}`.trim(), d.canvas && d.status !== 'waiting' ? `${DROP_STATUS[d.status]} · ${d.canvas}` : DROP_STATUS[d.status] || d.status));
+    if (d.detail) meta.append(el('span', d.status === 'failed' ? 'bad' : null, d.detail));
+    li.append(top, meta);
+    if (d.note) li.append(el('div', 'drop-note', d.note));
+    const acts = el('div', 'acts');
+    // Its canvas can change until the agent starts placing it.
+    if (d.status === 'waiting' || d.status === 'queued' || d.status === 'failed') {
+      const sel = el('select');
+      sel.setAttribute('aria-label', 'Agent canvas');
+      canvasSelect(sel, canvases, d.canvas, !d.canvas);
+      sel.addEventListener('change', async () => {
+        if (!sel.value) return;
+        try { await engine.chooseCanvas(d.id, sel.value); toast(`Queued for ${sel.value}.`); await loadInbox(); refresh(); } catch (e) { toast(e.message, true); }
+      });
+      acts.append(sel);
+    }
+    const forget = el('button', 'danger', 'Forget');
+    forget.title = 'Remove this drop from NoteX for good';
+    forget.addEventListener('click', async () => {
+      if (!window.confirm(`Forget ${d.name || 'this text'}? It is removed from NoteX for good.`)) return;
+      try { await engine.forgetDrop(d.id); toast('Forgotten.'); await loadInbox(); refresh(); } catch (e) { toast(e.message, true); }
+    });
+    acts.append(forget);
+    li.append(acts);
+    ul.append(li);
+  }
+}
+
+function dropOptions() {
+  const note = $('drop-note').value.trim();
+  return { note: note || undefined, canvas: $('drop-canvas').value || undefined };
+}
+
+async function keepFiles(files) {
+  if (!files.length) return;
+  const opts = dropOptions();
+  let kept = 0;
+  const refused = [];
+  for (const f of files) {
+    try { await engine.dropFile(f, opts); kept++; } catch (e) { refused.push(e.message); }
+  }
+  if (kept) $('drop-note').value = '';
+  // One message at the end, so a refusal is never covered by a later file's success.
+  const said = kept ? `Kept ${kept} file${kept === 1 ? '' : 's'}${opts.canvas ? ` for ${opts.canvas}` : ''}.` : '';
+  if (refused.length) toast(`${said} ${refused.join(' ')}`.trim(), true);
+  else if (kept) toast(said);
+  await loadInbox();
+  refresh();
+}
+
+async function keepText() {
+  const text = $('drop-text').value;
+  if (!text.trim()) { toast('Type something to keep first.', true); return; }
+  try {
+    const opts = dropOptions();
+    await engine.dropText(text, opts);
+    $('drop-text').value = '';
+    $('drop-note').value = '';
+    toast(`Kept${opts.canvas ? ` for ${opts.canvas}` : ''}.`);
+  } catch (e) { toast(e.message, true); return; }
+  await loadInbox();
+  refresh();
+}
+
 async function setRagxFolder() {
   $('menu').hidden = true;
   const now = S.state && S.state.ragx;
@@ -477,12 +602,27 @@ $('ragx-btn').addEventListener('click', setRagxFolder);
 $('filter').addEventListener('input', () => S.built && renderTree());
 $('show-place').addEventListener('click', () => showView('place'));
 $('show-doc').addEventListener('click', () => showView('doc'));
+$('view-browse').addEventListener('click', () => showTab('browse'));
+$('view-inbox').addEventListener('click', () => showTab('inbox'));
+$('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; keepFiles(files); });
+$('drop-keep').addEventListener('click', keepText);
+$('drop-text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) keepText(); });
+const zone = $('drop-zone');
+zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('over'); keepFiles([...e.dataTransfer.files]); });
+// A file let go anywhere else is not opened in place of the page.
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => e.preventDefault());
 
 (async () => {
   followWallpaper();
   if (TM && TM.ready) { try { await TM.ready; } catch (_) {} }
   try { S.dataDir = (await hostCall('host.dataDir')).dir; } catch (_) { S.dataDir = null; }
   S.local = await engine.local();
+  S.tab = (await recall('tab', 'browse')) === 'inbox' ? 'inbox' : 'browse';
+  $('view-browse').classList.toggle('on', S.tab === 'browse');
+  $('view-inbox').classList.toggle('on', S.tab === 'inbox');
   await refresh();
   schedule();
 })();

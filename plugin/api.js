@@ -32,16 +32,15 @@ export class Engine {
 
   local() { return readJson(`${this.base}/local.json`); }
 
-  async json(method, path, body) {
+  json(method, path, body) {
+    return this.send(method, path, body === undefined ? undefined : JSON.stringify(body), body !== undefined ? { 'content-type': 'application/json' } : {});
+  }
+
+  async send(method, path, body, headers = {}) {
     if (!this.rt) throw new EngineDown('The engine is not running.');
     let res;
     try {
-      res = await fetch(this.rt.url + path, {
-        method,
-        headers: { 'x-notex-token': this.rt.token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        cache: 'no-store',
-      });
+      res = await fetch(this.rt.url + path, { method, headers: { 'x-notex-token': this.rt.token, ...headers }, body, cache: 'no-store' });
     } catch (_) {
       throw new EngineDown(`The engine at ${this.rt.url} is not answering.`);
     }
@@ -72,4 +71,15 @@ export class Engine {
   setSync(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/sync`, { on }); }
   setRules(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/rules`, { on }); }
   cancelScript(id) { return this.json('POST', `/api/scripts/${encodeURIComponent(id)}/cancel`); }
+  inbox() { return this.json('GET', '/api/inbox'); }
+  dropText(text, { note, canvas } = {}) { return this.json('POST', '/api/inbox/text', { text, note, canvas }); }
+  /* A file goes as its own bytes; its name, note and canvas ride in headers (t-70d92dbfb0). */
+  dropFile(file, { note, canvas } = {}) {
+    const h = { 'content-type': 'application/octet-stream', 'x-drop-name': encodeURIComponent(file.name) };
+    if (note) h['x-drop-note'] = encodeURIComponent(note);
+    if (canvas) h['x-drop-canvas'] = encodeURIComponent(canvas);
+    return this.send('POST', '/api/inbox/file', file, h);
+  }
+  chooseCanvas(id, canvas) { return this.json('PUT', `/api/inbox/${encodeURIComponent(id)}/canvas`, { canvas }); }
+  forgetDrop(id) { return this.json('POST', `/api/inbox/${encodeURIComponent(id)}/forget`); }
 }

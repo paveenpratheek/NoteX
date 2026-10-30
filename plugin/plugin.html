@@ -15,6 +15,10 @@
     <strong>NoteX</strong>
     <span class="tag">File Fabric to RAGX</span>
   </div>
+  <div class="seg" id="views" role="group" aria-label="View" hidden>
+    <button id="view-browse" class="on">Canvases</button>
+    <button id="view-inbox">Inbox <span id="inbox-count" class="chip warn" hidden></span></button>
+  </div>
   <div class="pill" role="status"><span class="dot" id="dot" aria-hidden="true"></span><span id="status">Looking for the engine…</span></div>
   <div class="bar-end">
     <span class="path" id="ws-label"></span>
@@ -87,6 +91,28 @@
       <div id="section" class="section card"></div>
       <pre id="doc" class="doc card" hidden></pre>
     </article>
+  </section>
+
+  <section id="inbox" class="inbox" hidden>
+    <div class="sheet drop-sheet" aria-label="Drop">
+      <div class="sheet-head"><span class="eyebrow">Drop</span></div>
+      <label id="drop-zone" class="drop-zone card">
+        <input type="file" id="drop-files" class="sr" multiple accept=".txt,.md,.markdown,.pdf,.docx,.png,.jpg,.jpeg,.webp,.gif">
+        <strong>Drop files here</strong>
+        <span class="note">or click to pick · text, Markdown, PDF, Word, PNG, JPEG, WebP or GIF</span>
+      </label>
+      <textarea id="drop-text" placeholder="Or type something to keep" aria-label="Text to keep"></textarea>
+      <input id="drop-note" placeholder="A note about it, for you (optional)" aria-label="Note">
+      <div class="row">
+        <select id="drop-canvas" aria-label="Agent canvas"></select>
+        <button id="drop-keep" class="primary">Keep text</button>
+      </div>
+      <p class="note" id="drop-help"></p>
+    </div>
+    <div class="sheet drops-sheet" aria-label="In the inbox">
+      <div class="sheet-head"><span class="eyebrow">In the inbox</span><span class="note" id="drops-count"></span></div>
+      <ul id="drop-list" class="drops"></ul>
+    </div>
   </section>
 </main>
 

@@ -16,7 +16,8 @@
  * keeps which canvases auto-sync keeps in RAGX (t-0c1da1346d).
  * <data>/scripts/ keeps the totem scripts agents send, waiting or done, the
  * ledger of what each wrote and the backups taken before every write
- * (t-a80b904d43).
+ * (t-a80b904d43). <data>/bronze/ is the Inbox: what the user drops, kept as
+ * it arrived until it is placed on an agent canvas (t-1c0fff1756).
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -35,6 +36,7 @@ import { canvasFiles } from './files.js';
 import { RulesFile } from './agentrules.js';
 import { Writer } from './writer.js';
 import { readOut } from './readout.js';
+import { Bronze, BronzeError } from './bronze.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -43,6 +45,9 @@ export const DEFAULT_ORIGINS = ['http://127.0.0.1:7070', 'http://localhost:7070'
 export const DEFAULT_RUNTIME = path.join(HERE, '..', '..', 'plugin', 'runtime.json');
 const MAX_JSON = 64 * 1024;
 const MAX_SCRIPT_JSON = 256 * 1024; // a script may be 100 KB, escaped once more as JSON
+// A dropped file comes as its bytes, typed text as JSON (t-70d92dbfb0).
+const MAX_DROP = 100 * 1024 * 1024;
+const MAX_TEXT_JSON = 2 * 1024 * 1024; // 1 MB of text, escaped once more as JSON
 
 class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -50,6 +55,7 @@ class HttpError extends Error {
 
 function statusOf(e) {
   if (e instanceof HttpError) return e.status;
+  if (e instanceof BronzeError) return e.code === 'no-drop' ? 404 : e.code === 'placed' ? 409 : 400;
   if (e instanceof FabricError) return e.code === 'not-found' || e.code === 'no-workspace' ? 404 : e.code === 'bad-json' ? 409 : 500;
   if (e instanceof RagxError) return 503;
   return 500;
@@ -69,6 +75,20 @@ function readJson(req, max = MAX_JSON) {
       if (!s) return resolve({});
       try { resolve(JSON.parse(s)); } catch (_) { reject(new HttpError(400, 'bad-json', 'The request body is not JSON.')); }
     });
+    req.on('error', reject);
+  });
+}
+
+function readBytes(req, max) {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > max) { reject(new HttpError(413, 'too-large', `A drop can be at most ${Math.round(max / 1024 / 1024)} MB.`)); req.destroy(); return; }
+      parts.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(parts)));
     req.on('error', reject);
   });
 }
@@ -133,6 +153,29 @@ export async function startServer({
   const sync = new AutoSync({ config, saveConfig, dataDir: dir, build: buildAndKeep, busy: () => Boolean(reading && !reading.finished), log, ...syncOptions });
   const rules = new RulesFile({ config, saveConfig, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
   const writer = new Writer({ config, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
+  const bronze = new Bronze(dir);
+
+  /* The canvases assigned to the agent: those whose folder holds the
+   * agent.json CanvasX writes. Only they take drops (t-52f040cf72). */
+  const agentCanvases = () => {
+    if (!config.workspace) return [];
+    try { return listFabrics(config.workspace).filter((f) => fs.existsSync(path.join(f.dir, 'agent.json'))).map((f) => f.name); } catch (_) { return []; }
+  };
+  const agentCanvas = (name) => {
+    if (name == null || name === '') return null;
+    fabricDir(needWorkspace(), name);
+    if (!agentCanvases().includes(name)) throw new HttpError(409, 'not-agent', `${name} is not assigned to the agent - assign it in CanvasX first.`);
+    return name;
+  };
+  // What the Inbox shows of a drop: typed text and Markdown by their first words.
+  const shown = (d) => {
+    if (d.kind !== 'text' && d.kind !== 'md') return d;
+    let preview = '';
+    try { preview = fs.readFileSync(path.join(bronze.dir, d.blob), 'utf8').slice(0, 400).replace(/\s+/g, ' ').trim().slice(0, 160); } catch (_) { /* forgotten meanwhile */ }
+    return { ...d, preview };
+  };
+  const header = (req, name) => { const v = req.headers[name]; try { return v ? decodeURIComponent(String(v)) : null; } catch (_) { throw new HttpError(400, 'bad-header', `${name} is not URI-encoded.`); } };
+
   let stopping = false;
   let actualPort = port;
   const token = crypto.randomBytes(24).toString('base64url');
@@ -151,8 +194,33 @@ export async function startServer({
     let p;
 
     if (m('GET', /^\/api\/state$/)) {
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), ...workspaceState() });
+      const drops = bronze.list();
+      const inbox = { drops: drops.length, waiting: drops.filter((d) => d.status === 'waiting').length };
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), inbox, ...workspaceState() });
     }
+    /* The Inbox: drops kept in bronze until the user picks an agent canvas
+     * for them (t-85f3ec23ef, t-0f32cb63f2). */
+    if (m('GET', /^\/api\/inbox$/)) return json(200, { drops: bronze.list().map(shown), canvases: agentCanvases() });
+    if (m('POST', /^\/api\/inbox\/text$/)) {
+      const body = await readJson(req, MAX_TEXT_JSON);
+      if (typeof body.text !== 'string') throw new HttpError(400, 'bad-body', 'Send {"text": "...", "note": "...", "canvas": "..."}.');
+      if (Buffer.byteLength(body.text) > 1024 * 1024) throw new HttpError(413, 'too-large', 'Typed text can be at most 1 MB - drop it as a file.');
+      const canvas = agentCanvas(body.canvas);
+      return json(200, { drop: shown(bronze.land({ text: body.text, note: typeof body.note === 'string' ? body.note.trim() : null, canvas, via: 'page' })) });
+    }
+    if (m('POST', /^\/api\/inbox\/file$/)) {
+      const name = header(req, 'x-drop-name');
+      if (!name) throw new HttpError(400, 'no-name', 'Send the file\'s name in X-Drop-Name.');
+      const canvas = agentCanvas(header(req, 'x-drop-canvas'));
+      const bytes = await readBytes(req, MAX_DROP);
+      return json(200, { drop: shown(bronze.land({ bytes, name, note: header(req, 'x-drop-note'), canvas, via: 'page' })) });
+    }
+    if ((p = m('PUT', /^\/api\/inbox\/(d-[0-9a-f]{10})\/canvas$/))) {
+      const { canvas } = await readJson(req);
+      if (typeof canvas !== 'string' || !canvas) throw new HttpError(400, 'bad-body', 'Send {"canvas": "<an agent canvas>"}.');
+      return json(200, { drop: shown(bronze.choose(p[0], agentCanvas(canvas))) });
+    }
+    if ((p = m('POST', /^\/api\/inbox\/(d-[0-9a-f]{10})\/forget$/))) return json(200, bronze.forget(p[0]));
     if (m('PUT', /^\/api\/ragx$/)) {
       const body = await readJson(req);
       const folder = typeof body.path === 'string' ? body.path.trim().replace(/^"(.*)"$/, '$1') : '';
@@ -273,7 +341,7 @@ export async function startServer({
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
-        'access-control-allow-headers': 'X-Notex-Token, Content-Type',
+        'access-control-allow-headers': 'X-Notex-Token, Content-Type, X-Drop-Name, X-Drop-Note, X-Drop-Canvas',
         'access-control-max-age': '600',
       });
       return res.end();
