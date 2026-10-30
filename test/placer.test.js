@@ -170,3 +170,63 @@ test('only drops for agent canvases are placed, none while placing is off, and a
   await s.placer.stop();
   assert.equal(s.bronze.get(d.id).status, 'placed');
 });
+
+test('drops sent together are placed together in one script, the model shown their description and the user\'s message (t-8a49895e07, t-319d8470cb)', async (t) => {
+  const s = setup(t, []);
+  const send = 's-0123456789';
+  const ask = 'put these in a totem named Money';
+  const one = s.bronze.land({ text: 'receipt one', note: 'March receipts', ask, send, canvas: 'Board' });
+  const two = s.bronze.land({ text: 'receipt two', note: 'March receipts', ask, send, canvas: 'Board' });
+  const half = `<Canvas name="Board"><Totem name="Money"><Note name="One" drop="${one.id}"/></Totem></Canvas>`;
+  const both = `<Canvas name="Board"><Totem name="Money"><Note name="One" drop="${one.id}"/><Note name="Two" drop="${two.id}"/></Totem></Canvas>`;
+  const answers = [fence(half), fence(both)];
+  const asked = [];
+  s.placer.run = async (req) => { asked.push(req); return { text: answers.shift() }; };
+  assert.equal((await s.placer.tick()).status, 'placed');
+  assert.equal(asked.length, 2);
+  const first = asked[0].prompt;
+  assert.ok(first.includes('2 drops the user sent together') && first.includes(ask) && first.includes('March receipts'));
+  assert.match(asked[1].prompt, new RegExp(`does not place ${two.id} - every drop sent together`));
+  assert.deepEqual([one.id, two.id].map((id) => s.bronze.get(id).status), ['placed', 'placed']);
+  assert.equal(s.placer.tick(), null);
+});
+
+test('a send left to its message goes on the new canvas it asks for, made an agent canvas (t-8c4e28b7b4)', async (t) => {
+  const s = setup(t, []);
+  const d = s.bronze.land({ text: 'scan of the invoice', ask: 'create a new canvas named Bills and put this in a totem named March', send: 's-0000000001', byMessage: true });
+  assert.equal(d.status, 'queued');
+  assert.equal(d.canvas, null);
+  const asked = [];
+  s.placer.run = async (req) => { asked.push(req); return { text: fence(`<Canvas name="Bills"><Totem name="March"><Note name="Invoice" drop="${d.id}"/></Totem></Canvas>`) }; };
+  const r = await s.placer.tick();
+  assert.equal(r.status, 'placed');
+  assert.equal(r.canvas, 'Bills');
+  assert.ok(asked[0].prompt.includes('=== Canvas "Board" ===') && asked[0].prompt.includes('create a new canvas named Bills'));
+  assert.ok(fs.existsSync(path.join(s.ws, 'Bills', 'agent.json')));
+  const now = s.bronze.get(d.id);
+  assert.equal(now.canvas, 'Bills');
+  assert.equal(now.status, 'placed');
+  assert.ok(s.writer.agent.activity('Bills').some((a) => a.what === 'created'));
+});
+
+test('a message cannot send drops onto the user\'s own canvas, nor move a drop the user sent to a canvas', async (t) => {
+  const s = setup(t, []);
+  assert.throws(() => s.bronze.land({ text: 'x', byMessage: true }), /Write the agent a message/);
+  const d = s.bronze.land({ text: 'a note', ask: 'put it on Notes' });
+  assert.equal(d.status, 'waiting');
+  assert.equal(s.bronze.choose(d.id, null, { byMessage: true }).byMessage, true);
+  const answers = [
+    fence(`<Canvas name="Notes"><Totem name="T"><Note name="N" drop="${d.id}"/></Totem></Canvas>`),
+    fence(`<Canvas name="Board"><Totem name="T"><Note name="N" drop="${d.id}"/></Totem></Canvas>`),
+  ];
+  const asked = [];
+  s.placer.run = async (req) => { asked.push(req); return { text: answers.shift() }; };
+  assert.equal((await s.placer.tick()).status, 'placed');
+  assert.match(asked[1].prompt, /"Notes" is the user's own canvas/);
+  assert.ok(!fs.existsSync(path.join(s.ws, 'Notes', 'agent.json')));
+  assert.equal(s.bronze.get(d.id).canvas, 'Board');
+  const mine = s.bronze.land({ text: 'mine', canvas: 'Board' });
+  assert.throws(() => s.bronze.settle(mine.id, 'Bills'), /which the user chose/);
+  const plain = s.bronze.land({ text: 'no message' });
+  assert.throws(() => s.bronze.choose(plain.id, null, { byMessage: true }), /no message for the agent/);
+});

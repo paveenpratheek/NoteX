@@ -156,6 +156,19 @@ export class AgentCanvases {
     return true;
   }
 
+  /* A new canvas the user's message asked the agent for: an empty canvas
+   * marked for the agent from the start, so it never held anything of the
+   * user's (t-8c4e28b7b4, t-52f040cf72). */
+  create(canvas, detail = {}) {
+    const dir = this.writer.canvasDir(canvas);
+    if (fs.existsSync(dir)) throw new Refusal(`${canvas} is already in the workspace.`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'fabric.json'), JSON.stringify({ areas: [], drawings: [], files: [], links: [], totems: [] }));
+    fs.writeFileSync(path.join(dir, 'agent.json'), JSON.stringify({ assignedAt: new Date(this.now()).toISOString(), by: 'NoteX placer' }, null, 2));
+    this.note(canvas, 'created', detail);
+    return dir;
+  }
+
   /* A forgotten drop out of every script that names it, now and its good
    * copy; earlier versions keep only its id and stay as they are
    * (t-983bfb918b). The totems changed, by name. */

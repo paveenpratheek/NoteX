@@ -461,27 +461,39 @@ function renderScripts() {
 
 /* What the user drops is kept as it arrived until it goes to a canvas
  * assigned to the agent - picked now or later (t-85f3ec23ef, t-0f32cb63f2).
- * Only canvases CanvasX has assigned are offered (t-52f040cf72). */
+ * Only canvases CanvasX has assigned are offered (t-52f040cf72).
+ *
+ * The composer sends like a chat prompt: files attached, what they are, and
+ * a message to the agent, with one Send (t-e0f8a22b3a, t-319d8470cb). With a
+ * message, the canvas can be left to it (t-8c4e28b7b4). */
 const KIND_LABEL = { text: 'Text', md: 'Markdown', pdf: 'PDF', docx: 'Word', image: 'Image' };
 const DROP_STATUS = { waiting: 'Waiting for a canvas', queued: 'Queued', placing: 'Being placed', placed: 'Placed', failed: 'Could not place' };
+const BY_MESSAGE = '*message';
+const DROP_EXT = { txt: 'TXT', md: 'MD', markdown: 'MD', pdf: 'PDF', docx: 'DOCX', png: 'IMG', jpg: 'IMG', jpeg: 'IMG', webp: 'IMG', gif: 'IMG' };
+const extOf = (name) => ((/\.([^.]+)$/.exec(name) || [])[1] || '').toLowerCase();
 
-function canvasSelect(sel, canvases, current, later) {
+/* byMessage adds "As my message says": true offers it, 'off' shows it greyed. */
+function canvasSelect(sel, canvases, current, later, byMessage = false) {
   sel.replaceChildren();
-  if (later) sel.append(new Option(canvases.length ? 'Choose the canvas later' : 'No canvas is assigned to the agent yet', ''));
+  if (later) sel.append(new Option(canvases.length || byMessage ? 'Choose the canvas later' : 'No canvas is assigned to the agent yet', ''));
   for (const c of canvases) sel.append(new Option(c, c));
-  sel.value = current && canvases.includes(current) ? current : '';
-  sel.disabled = !canvases.length;
+  if (byMessage) {
+    const o = new Option('As my message says', BY_MESSAGE);
+    o.disabled = byMessage === 'off';
+    sel.append(o);
+  }
+  sel.value = current === BY_MESSAGE && byMessage === true ? BY_MESSAGE : current && canvases.includes(current) ? current : '';
+  sel.disabled = !canvases.length && !byMessage;
 }
 
 async function loadInbox() {
   let r;
   try { r = await engine.inbox(); } catch (e) { toast(e.message, true); return; }
   S.inbox = r;
-  const keep = $('drop-canvas').value;
-  canvasSelect($('drop-canvas'), r.canvases, keep, true);
+  canvasSelect($('drop-canvas'), r.canvases, $('drop-canvas').value, true, $('drop-ask').value.trim() ? true : 'off');
   $('drop-help').textContent = r.canvases.length
-    ? 'A drop with no canvas waits here; one with a canvas is queued for the agent to place.'
-    : 'Assign a canvas to the agent in CanvasX to send drops to it. Until then, everything you drop waits here, kept as it is.';
+    ? 'Everything you send is kept as it is. With a canvas, the agent places it there; "As my message says" lets your message name the canvas, or ask for a new one. With neither, it waits here.'
+    : 'No canvas is assigned to the agent yet. Tell the agent in your message - "a new canvas named Bills" - and pick "As my message says", or assign one in CanvasX. Until then, what you send waits here.';
   renderPlacer(r.placer, r.drops);
   renderDrops();
   // While the agent has drops to place, the list follows it.
@@ -499,7 +511,7 @@ function renderPlacer(p, drops) {
   const doing = p.placing && drops.find((d) => d.id === p.placing);
   const text = !p.on ? (drops.some((d) => d.status === 'queued') ? 'Placing is off: queued drops wait until you switch it on.' : '')
     : p.held ? `Placing is paused for a few minutes: ${p.held}`
-      : doing ? `The agent is placing ${doing.name || 'your text'} on ${doing.canvas}…` : '';
+      : doing ? `The agent is placing ${doing.name || 'your text'}${doing.send && drops.filter((d) => d.send === doing.send).length > 1 ? ' and what was sent with it' : ''} on ${doing.canvas || 'the canvas its message names'}…` : '';
   line.hidden = !text;
   line.textContent = text;
   line.classList.toggle('bad', Boolean(p.on && p.held));
@@ -525,19 +537,29 @@ function renderDrops() {
     const meta = el('div', 'meta');
     meta.append(el('span', null, ago(d.landedAt)));
     const kind = d.status === 'waiting' ? 'warn' : d.status === 'failed' ? 'bad' : d.status === 'placed' ? '' : 'acc';
-    meta.append(el('span', `chip ${kind}`.trim(), d.canvas && d.status !== 'waiting' ? `${DROP_STATUS[d.status]} · ${d.canvas}` : DROP_STATUS[d.status] || d.status));
+    const target = d.status === 'waiting' ? null : d.canvas || (d.byMessage ? 'as its message says' : null);
+    meta.append(el('span', `chip ${kind}`.trim(), target ? `${DROP_STATUS[d.status]} · ${target}` : DROP_STATUS[d.status] || d.status));
     if (d.detail) meta.append(el('span', d.status === 'failed' ? 'bad' : null, d.detail));
     li.append(top, meta);
     if (d.note) li.append(el('div', 'drop-note', d.note));
+    if (d.ask) {
+      const ask = el('div', 'drop-ask');
+      ask.append(el('b', null, 'To the agent: '), document.createTextNode(d.ask));
+      li.append(ask);
+    }
     const acts = el('div', 'acts');
     // Its canvas can change until the agent starts placing it.
     if (d.status === 'waiting' || d.status === 'queued' || d.status === 'failed') {
       const sel = el('select');
       sel.setAttribute('aria-label', 'Agent canvas');
-      canvasSelect(sel, canvases, d.canvas, !d.canvas);
+      canvasSelect(sel, canvases, d.byMessage ? BY_MESSAGE : d.canvas, !d.canvas && !d.byMessage, Boolean(d.ask));
       sel.addEventListener('change', async () => {
         if (!sel.value) return;
-        try { await engine.chooseCanvas(d.id, sel.value); toast(`Queued for ${sel.value}.`); await loadInbox(); refresh(); } catch (e) { toast(e.message, true); }
+        try {
+          if (sel.value === BY_MESSAGE) { await engine.leaveToMessage(d.id); toast('Queued - the agent places it as your message says.'); } else { await engine.chooseCanvas(d.id, sel.value); toast(`Queued for ${sel.value}.`); }
+          await loadInbox();
+          refresh();
+        } catch (e) { toast(e.message, true); }
       });
       acts.append(sel);
     }
@@ -555,38 +577,71 @@ function renderDrops() {
   }
 }
 
-function dropOptions() {
-  const note = $('drop-note').value.trim();
-  return { note: note || undefined, canvas: $('drop-canvas').value || undefined };
+/* Files wait above the description until Send, each with a way to take it off. */
+function attach(files) {
+  const refused = files.filter((f) => !DROP_EXT[extOf(f.name)]).map((f) => f.name);
+  if (refused.length) toast(`${refused.join(', ')}: not text, Markdown, a PDF, a Word file or a PNG, JPEG, WebP or GIF image.`, true);
+  S.attached = [...(S.attached || []), ...files.filter((f) => DROP_EXT[extOf(f.name)])];
+  renderAttached();
 }
 
-async function keepFiles(files) {
-  if (!files.length) return;
-  const opts = dropOptions();
-  let kept = 0;
-  const refused = [];
-  for (const f of files) {
-    try { await engine.dropFile(f, opts); kept++; } catch (e) { refused.push(e.message); }
-  }
-  if (kept) $('drop-note').value = '';
-  // One message at the end, so a refusal is never covered by a later file's success.
-  const said = kept ? `Kept ${kept} file${kept === 1 ? '' : 's'}${opts.canvas ? ` for ${opts.canvas}` : ''}.` : '';
-  if (refused.length) toast(`${said} ${refused.join(' ')}`.trim(), true);
-  else if (kept) toast(said);
-  await loadInbox();
-  refresh();
+function renderAttached() {
+  const ul = $('drop-attached');
+  for (const img of ul.querySelectorAll('img')) URL.revokeObjectURL(img.src);
+  ul.replaceChildren();
+  const files = S.attached || [];
+  ul.hidden = !files.length;
+  files.forEach((f, i) => {
+    const li = el('li');
+    li.title = f.name;
+    if (DROP_EXT[extOf(f.name)] === 'IMG') {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.alt = '';
+      li.append(img);
+    } else li.append(el('span', 'kind', DROP_EXT[extOf(f.name)]));
+    const off = el('button', null, '×');
+    off.title = `Take ${f.name} off`;
+    off.setAttribute('aria-label', `Take ${f.name} off`);
+    off.addEventListener('click', () => { S.attached.splice(i, 1); renderAttached(); });
+    li.append(el('span', 'name', f.name), off);
+    ul.append(li);
+  });
+  $('drop-text').placeholder = files.length
+    ? `What ${files.length === 1 ? 'this is' : 'these are'} - what you want remembered about ${files.length === 1 ? 'it' : 'them'}`
+    : "Describe what you're dropping - or, with no file, type what to keep";
 }
 
-async function keepText() {
-  const text = $('drop-text').value;
-  if (!text.trim()) { toast('Type something to keep first.', true); return; }
+/* "As my message says" follows the message box until the user picks a canvas themselves. */
+function askChanged() {
+  const sel = $('drop-canvas');
+  const has = Boolean($('drop-ask').value.trim());
+  const opt = [...sel.options].find((o) => o.value === BY_MESSAGE);
+  if (opt) opt.disabled = !has;
+  if (!S.canvasPicked) sel.value = has ? BY_MESSAGE : '';
+  else if (!has && sel.value === BY_MESSAGE) sel.value = '';
+}
+
+async function sendDrop() {
+  const files = S.attached || [];
+  const description = $('drop-text').value;
+  const ask = $('drop-ask').value.trim();
+  const to = $('drop-canvas').value;
+  if (!files.length && !description.trim()) { toast('Attach a file or write what to keep first.', true); return; }
+  if (to === BY_MESSAGE && !ask) { toast('Tell the agent where it goes, or pick a canvas.', true); return; }
+  const btn = $('drop-send');
+  btn.disabled = true;
   try {
-    const opts = dropOptions();
-    await engine.dropText(text, opts);
+    await engine.sendDrop({ files, description, ask, canvas: to === BY_MESSAGE ? '' : to, byMessage: to === BY_MESSAGE });
+    S.attached = [];
+    renderAttached();
     $('drop-text').value = '';
-    $('drop-note').value = '';
-    toast(`Kept${opts.canvas ? ` for ${opts.canvas}` : ''}.`);
-  } catch (e) { toast(e.message, true); return; }
+    $('drop-ask').value = '';
+    S.canvasPicked = false;
+    askChanged();
+    const what = files.length ? `${files.length} file${files.length === 1 ? '' : 's'}` : 'your text';
+    toast(`Kept ${what}${to === BY_MESSAGE ? ' - the agent places it as your message says' : to ? ` for ${to}` : ''}.`);
+  } catch (e) { toast(e.message, true); return; } finally { btn.disabled = false; }
   await loadInbox();
   refresh();
 }
@@ -731,14 +786,16 @@ $('view-agents').addEventListener('click', () => showTab('agents'));
 $('agents-reload').addEventListener('click', loadAgents);
 $('assign-btn').addEventListener('click', toggleAssign);
 $('render-btn').addEventListener('click', drawAgain);
-$('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; keepFiles(files); });
-$('drop-keep').addEventListener('click', keepText);
+$('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; attach(files); });
+$('drop-send').addEventListener('click', sendDrop);
 $('placing-btn').addEventListener('click', togglePlacing);
-$('drop-text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) keepText(); });
+for (const id of ['drop-text', 'drop-ask']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendDrop(); });
+$('drop-ask').addEventListener('input', askChanged);
+$('drop-canvas').addEventListener('change', () => { S.canvasPicked = true; });
 const zone = $('drop-zone');
 zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
 zone.addEventListener('dragleave', () => zone.classList.remove('over'));
-zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('over'); keepFiles([...e.dataTransfer.files]); });
+zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('over'); attach([...e.dataTransfer.files]); });
 // A file let go anywhere else is not opened in place of the page.
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => e.preventDefault());

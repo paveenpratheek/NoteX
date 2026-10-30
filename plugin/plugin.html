@@ -102,11 +102,14 @@
         <strong>Drop files here</strong>
         <span class="note">or click to pick · text, Markdown, PDF, Word, PNG, JPEG, WebP or GIF</span>
       </label>
-      <textarea id="drop-text" placeholder="Or type something to keep" aria-label="Text to keep"></textarea>
-      <input id="drop-note" placeholder="A note about it, for you (optional)" aria-label="Note">
+      <ul id="drop-attached" class="attached" hidden></ul>
+      <label class="field" for="drop-text">What it is</label>
+      <textarea id="drop-text" placeholder="Describe what you're dropping - or, with no file, type what to keep"></textarea>
+      <label class="field" for="drop-ask">To the agent <span class="note">(optional)</span></label>
+      <textarea id="drop-ask" class="ask" placeholder="Where it goes and what to call it, e.g. &quot;make a new canvas Bills, with this in a totem March&quot;"></textarea>
       <div class="row">
         <select id="drop-canvas" aria-label="Agent canvas"></select>
-        <button id="drop-keep" class="primary">Keep text</button>
+        <button id="drop-send" class="primary">Send</button>
       </div>
       <p class="note" id="drop-help"></p>
     </div>

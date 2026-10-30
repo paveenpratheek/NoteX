@@ -10,6 +10,12 @@
  * (t-48e622a449). A drop waits until the user picks the agent canvas it goes
  * to; there the agent places it (t-85f3ec23ef).
  *
+ * The page sends drops together: the files of one send, or its typed text,
+ * share a send id, the user's description as their note, and the user's
+ * message to the agent as their ask (t-e0f8a22b3a, t-319d8470cb). With a
+ * message, the canvas can be left to it - "as my message says" - and the
+ * agent then records the canvas it placed them on (t-8c4e28b7b4).
+ *
  * drops.jsonl only grows - landed, canvas chosen, status - and a drop's state
  * is its lines folded in order (t-b631349744). Forgetting is the one
  * exception: the drop's lines are removed and its blob deleted unless another
@@ -113,10 +119,12 @@ export class Bronze {
   state() {
     const drops = new Map();
     for (const e of readLines(this.log)) {
-      if (e.ev === 'landed') drops.set(e.id, { id: e.id, kind: e.kind, blob: e.blob, bytes: e.bytes, name: e.name, via: e.via, note: e.note, canvas: null, status: 'waiting', detail: null, landedAt: e.at, updatedAt: e.at });
+      if (e.ev === 'landed') drops.set(e.id, { id: e.id, kind: e.kind, blob: e.blob, bytes: e.bytes, name: e.name, via: e.via, note: e.note, send: e.send || null, ask: e.ask || null, canvas: null, byMessage: false, chosenBy: null, status: 'waiting', detail: null, landedAt: e.at, updatedAt: e.at });
       const d = drops.get(e.id);
       if (!d) continue;
-      if (e.ev === 'canvas') Object.assign(d, { canvas: e.canvas, status: 'queued', detail: null, updatedAt: e.at });
+      // The agent settling the canvas a message left to it keeps the drop's status.
+      if (e.ev === 'canvas' && e.by === 'agent') Object.assign(d, { canvas: e.canvas, byMessage: false, chosenBy: 'agent', updatedAt: e.at });
+      else if (e.ev === 'canvas') Object.assign(d, { canvas: e.canvas || null, byMessage: Boolean(e.byMessage), chosenBy: e.canvas ? 'user' : null, status: 'queued', detail: null, updatedAt: e.at });
       if (e.ev === 'status') Object.assign(d, { status: e.status, detail: e.detail, updatedAt: e.at });
     }
     // The erasure is written before anything is removed (t-0057e4703e).
@@ -131,8 +139,10 @@ export class Bronze {
     return d;
   }
 
-  /* Takes one drop: a file's bytes and its name, or text the user typed. */
-  land({ bytes = null, name = null, text = null, via = 'drop', note = null, canvas = null } = {}) {
+  /* A file's bytes and name, or typed text, checked to be what they say:
+   * what land() keeps, or a BronzeError. A send checks all its parts before
+   * any lands (t-fe28f948b4). */
+  prepare({ bytes = null, name = null, text = null } = {}) {
     let kind;
     if (text != null) {
       if (bytes != null) throw new BronzeError('two-things', 'A drop is a file or text, not both.');
@@ -147,7 +157,16 @@ export class Bronze {
     if (!bytes.length || (kind === 'text' && !bytes.toString('utf8').trim())) throw new BronzeError('empty', `${name || 'The text'} is empty.`);
     const ext = sniff(kind, bytes);
     if (!ext) throw new BronzeError('not-kind', `${name || 'The text'} is not what its name says: its bytes are not ${kind === 'md' ? 'Markdown' : kind === 'docx' ? 'a Word file' : kind === 'pdf' ? 'a PDF' : kind === 'image' ? 'an image' : 'text'}.`);
+    return { kind, bytes, name, ext };
+  }
 
+  /* Takes one drop: a file's bytes and its name, or text the user typed.
+   * canvas is an agent canvas, or byMessage leaves it to the ask. */
+  land({ bytes = null, name = null, text = null, via = 'drop', note = null, ask = null, send = null, canvas = null, byMessage = false } = {}) {
+    if (byMessage && !ask) throw new BronzeError('no-ask', 'Write the agent a message saying where it goes, or pick a canvas.');
+    const ready = this.prepare({ bytes, name, text });
+    const { kind, ext } = ready;
+    ({ bytes, name } = ready);
     const sha = sha256(bytes);
     const blob = `blobs/${kind}/${sha.slice(0, 2)}/${sha}${ext}`;
     const abs = path.join(this.dir, blob);
@@ -157,8 +176,9 @@ export class Bronze {
     }
     const id = 'd-' + crypto.randomBytes(5).toString('hex');
     const at = this.at();
-    this.append(this.log, { ev: 'landed', id, at, kind, blob, bytes: bytes.length, name: name ? path.basename(name) : null, via, note: note || null });
+    this.append(this.log, { ev: 'landed', id, at, kind, blob, bytes: bytes.length, name: name ? path.basename(name) : null, via, note: note || null, ...(send ? { send } : {}), ...(ask ? { ask } : {}) });
     if (canvas) this.append(this.log, { ev: 'canvas', id, at, canvas });
+    else if (byMessage) this.append(this.log, { ev: 'canvas', id, at, canvas: null, byMessage: true });
     return this.get(id);
   }
 
@@ -170,13 +190,24 @@ export class Bronze {
   /* Where a drop's bytes are on disk. */
   file(id) { return path.join(this.dir, this.need(this.state(), id).blob); }
 
-  /* The user picks the canvas a drop goes to: now, or later for one waiting.
-   * A drop being placed or already placed keeps its canvas. */
-  choose(id, canvas) {
+  /* The user picks the canvas a drop goes to: now, or later for one waiting,
+   * or leaves it to the drop's message. A drop being placed or already
+   * placed keeps its canvas. */
+  choose(id, canvas, { byMessage = false } = {}) {
     const d = this.need(this.state(), id);
-    if (!canvas) throw new BronzeError('no-canvas', 'Pick the canvas the drop goes to.');
-    if (d.status === 'placing' || d.status === 'placed') throw new BronzeError('placed', `${id} is ${d.status} on ${d.canvas}; it keeps that canvas.`);
-    this.append(this.log, { ev: 'canvas', id, at: this.at(), canvas });
+    if (!canvas && !byMessage) throw new BronzeError('no-canvas', 'Pick the canvas the drop goes to.');
+    if (byMessage && !d.ask) throw new BronzeError('no-ask', `${id} has no message for the agent to say where it goes - pick a canvas.`);
+    if (d.status === 'placing' || d.status === 'placed') throw new BronzeError('placed', `${id} is ${d.status} on ${d.canvas || 'the canvas its message names'}; it keeps that canvas.`);
+    this.append(this.log, byMessage ? { ev: 'canvas', id, at: this.at(), canvas: null, byMessage: true } : { ev: 'canvas', id, at: this.at(), canvas });
+    return this.get(id);
+  }
+
+  /* The agent records the canvas a drop's message sent it to, as it places
+   * it - again on a second try; never over a canvas the user chose. */
+  settle(id, canvas) {
+    const d = this.need(this.state(), id);
+    if (!d.byMessage && d.chosenBy !== 'agent') throw new BronzeError('placed', `${id} goes on ${d.canvas}, which the user chose.`);
+    this.append(this.log, { ev: 'canvas', id, at: this.at(), canvas, by: 'agent' });
     return this.get(id);
   }
 
@@ -184,7 +215,7 @@ export class Bronze {
   mark(id, status, detail = null) {
     const d = this.need(this.state(), id);
     if (!STATUSES.includes(status)) throw new BronzeError('status', `"${status}" is not a drop status.`);
-    if (status !== 'waiting' && !d.canvas) throw new BronzeError('no-canvas', `${id} has no canvas yet.`);
+    if (status !== 'waiting' && !d.canvas && !d.byMessage) throw new BronzeError('no-canvas', `${id} has no canvas yet.`);
     this.append(this.log, { ev: 'status', id, at: this.at(), status, detail });
     return this.get(id);
   }

@@ -53,6 +53,9 @@ const MAX_SCRIPT_JSON = 256 * 1024; // a script may be 100 KB, escaped once more
 // A dropped file comes as its bytes, typed text as JSON (t-70d92dbfb0).
 const MAX_DROP = 100 * 1024 * 1024;
 const MAX_TEXT_JSON = 2 * 1024 * 1024; // 1 MB of text, escaped once more as JSON
+const MAX_SEND = 200 * 1024 * 1024; // a send's files together
+const MAX_TEXT = 1024 * 1024;
+const MAX_ASK = 8 * 1024;
 
 class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -238,9 +241,43 @@ export async function startServer({
       const bytes = await readBytes(req, MAX_DROP);
       return json(200, { drop: shown(bronze.land({ bytes, name, note: header(req, 'x-drop-note'), canvas, via: 'page' })) });
     }
+    /* A send from the composer: its files, the user's description of them
+     * and their message to the agent, in one multipart request - all of it
+     * checked before any lands, so the placer never sees half a send
+     * (t-e0f8a22b3a, t-fe28f948b4). With no file, the description is the drop. */
+    if (m('POST', /^\/api\/inbox\/send$/)) {
+      const type = String(req.headers['content-type'] || '');
+      if (!type.startsWith('multipart/form-data')) throw new HttpError(400, 'bad-body', 'Send the drop as multipart/form-data.');
+      const raw = await readBytes(req, MAX_SEND);
+      let form;
+      try { form = await new Response(raw, { headers: { 'content-type': type } }).formData(); } catch (_) { throw new HttpError(400, 'bad-body', 'The send is not readable multipart/form-data.'); }
+      const field = (k) => { const v = form.get(k); return typeof v === 'string' ? v.trim() : ''; };
+      const description = field('description');
+      const ask = field('message');
+      const byMessage = field('byMessage') === 'true';
+      if (byMessage && !ask) throw new HttpError(400, 'no-ask', 'Write the agent a message saying where it goes, or pick a canvas.');
+      if (Buffer.byteLength(description) > MAX_TEXT) throw new HttpError(413, 'too-large', 'A description can be at most 1 MB - drop it as a file.');
+      if (ask.length > MAX_ASK) throw new HttpError(413, 'too-large', `A message to the agent can be at most ${MAX_ASK} characters.`);
+      const canvas = byMessage ? null : agentCanvas(field('canvas'));
+      const files = form.getAll('file').filter((f) => typeof f !== 'string');
+      if (!files.length && !description) throw new HttpError(400, 'empty', 'Nothing to keep: attach a file or write a description.');
+      const parts = [];
+      for (const f of files) {
+        if (f.size > MAX_DROP) throw new HttpError(413, 'too-large', `${f.name} is over ${Math.round(MAX_DROP / 1024 / 1024)} MB.`);
+        const bytes = Buffer.from(await f.arrayBuffer());
+        bronze.prepare({ bytes, name: f.name });
+        parts.push({ bytes, name: f.name });
+      }
+      if (!parts.length) parts.push({ text: description });
+      const send = 's-' + crypto.randomBytes(5).toString('hex');
+      const note = files.length ? description || null : null;
+      const drops = parts.map((part) => shown(bronze.land({ ...part, note, ask: ask || null, send, canvas, byMessage, via: 'page' })));
+      return json(200, { send, drops });
+    }
     if ((p = m('PUT', /^\/api\/inbox\/(d-[0-9a-f]{10})\/canvas$/))) {
-      const { canvas } = await readJson(req);
-      if (typeof canvas !== 'string' || !canvas) throw new HttpError(400, 'bad-body', 'Send {"canvas": "<an agent canvas>"}.');
+      const { canvas, byMessage } = await readJson(req);
+      if (byMessage === true) return json(200, { drop: shown(bronze.choose(p[0], null, { byMessage: true })) });
+      if (typeof canvas !== 'string' || !canvas) throw new HttpError(400, 'bad-body', 'Send {"canvas": "<an agent canvas>"} or {"byMessage": true}.');
       return json(200, { drop: shown(bronze.choose(p[0], agentCanvas(canvas))) });
     }
     // Out of its scripts, the canvas, backups, RAGX and bronze (t-985017e732).

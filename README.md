@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-122%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -111,8 +111,9 @@ Later scripts can change the agent's own work:
 - Switch a canvas on and it follows File Fabric's saves into RAGX automatically.
 
 **Inbox** (the first layer of the data pipeline, in progress)
-- Drop files (text, Markdown, PDF, Word, images) or type text on the page's Inbox, or use `npm run notex -- drop`. Each drop is checked to be what its name says and kept exactly as it arrived, stored once by its SHA-256.
-- A drop waits until you pick a canvas assigned to the agent.
+- The Inbox sends like a chat prompt. Attach files (text, Markdown, PDF, Word, images), say **what it is** below them, and optionally write **to the agent** where it goes and what to call it, then press **Send**. With no file, what you write is itself kept as text. `npm run notex -- drop` works from the command line.
+- Each file is its own drop, carrying your description and your message. Each is checked to be what its name says and kept exactly as it arrived, stored once by its SHA-256. A send lands whole or not at all.
+- A drop waits until you pick a canvas assigned to the agent, or pick **As my message says**: the agent then puts it on the agent canvas your message names, or on a new canvas it asks for ("make a new canvas Bills, with this in a totem March"), which NoteX creates already assigned to the agent. It never writes on your own canvases.
 - **Forget** removes a drop for good: from its totem scripts (and any link to its note), from the canvas, from its copy in `sources/`, from the backups that held it, from bronze and from RAGX. The erasure log keeps no content. Earlier script versions keep only its id.
 
 **Agent canvases** (assigned to the agent in CanvasX, or from NoteX's Agent canvases view)
@@ -120,7 +121,8 @@ Later scripts can change the agent's own work:
 - The canvas is drawn from one totem script per totem. An agent changes a totem by sending its whole script again, and the new version is kept only if the canvas still draws with it. Every earlier version is kept, along with the last one that drew.
 - Totems stay where they were first placed; one that grows wider pushes the totems after it. A script that stops drawing is drawn from its last good version, so one broken totem never takes the others with it.
 - Scripts name Inbox drops by id, so the content stays in one place. A drop placed this way is marked placed.
-- **The agent places drops by itself.** Once you pick a drop's canvas, NoteX shows Claude Code (headless, with no tools) the canvas's scripts and the drop, and takes back one totem script. The script must place the drop and keep everything its totem already held, word for word, or Claude is asked once more with the reason. A switch on the Inbox turns placing off.
+- **The agent places drops by itself.** Once you pick a drop's canvas, NoteX shows Claude Code (headless, with no tools) the canvas's scripts, the drops, your description and your message, and takes back one totem script. Files sent together are placed together, in that one script. The script must place every drop and keep everything its totem already held, word for word, or Claude is asked once more with the reason. A switch on the Inbox turns placing off.
+- Your description stays in the Inbox; RAGX gets the files, not the description, for now.
 - **On to RAGX**: after every render NoteX lists the drops on the canvas, each with its place and drop time, and RAGX takes each as a document of its own, searchable by when it was dropped. The list waits while RAGX is stopped. An agent canvas is never also synced as a canvas document, so nothing is found twice.
 
 **Rules canvas**
@@ -149,7 +151,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 122, all passing, in ~2,650 lines |
+| Tests | 126, all passing, in ~2,700 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 

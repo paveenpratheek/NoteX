@@ -72,15 +72,20 @@ export class Engine {
   setRules(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/rules`, { on }); }
   cancelScript(id) { return this.json('POST', `/api/scripts/${encodeURIComponent(id)}/cancel`); }
   inbox() { return this.json('GET', '/api/inbox'); }
-  dropText(text, { note, canvas } = {}) { return this.json('POST', '/api/inbox/text', { text, note, canvas }); }
-  /* A file goes as its own bytes; its name, note and canvas ride in headers (t-70d92dbfb0). */
-  dropFile(file, { note, canvas } = {}) {
-    const h = { 'content-type': 'application/octet-stream', 'x-drop-name': encodeURIComponent(file.name) };
-    if (note) h['x-drop-note'] = encodeURIComponent(note);
-    if (canvas) h['x-drop-canvas'] = encodeURIComponent(canvas);
-    return this.send('POST', '/api/inbox/file', file, h);
+  /* A send goes whole, as one multipart body - its files, the description,
+   * the message to the agent and the canvas - so it lands all or none
+   * (t-fe28f948b4). The browser sets the multipart content type. */
+  sendDrop({ files = [], description = '', ask = '', canvas = '', byMessage = false } = {}) {
+    const fd = new FormData();
+    for (const f of files) fd.append('file', f, f.name);
+    fd.append('description', description);
+    fd.append('message', ask);
+    fd.append('canvas', canvas);
+    if (byMessage) fd.append('byMessage', 'true');
+    return this.send('POST', '/api/inbox/send', fd);
   }
   chooseCanvas(id, canvas) { return this.json('PUT', `/api/inbox/${encodeURIComponent(id)}/canvas`, { canvas }); }
+  leaveToMessage(id) { return this.json('PUT', `/api/inbox/${encodeURIComponent(id)}/canvas`, { byMessage: true }); }
   forgetDrop(id) { return this.json('POST', `/api/inbox/${encodeURIComponent(id)}/forget`); }
   setPlacing(on) { return this.json('PUT', '/api/placer', { on }); }
   agentCanvases() { return this.json('GET', '/api/agent-canvases'); }

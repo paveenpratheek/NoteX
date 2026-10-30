@@ -168,3 +168,44 @@ test('the page may send the drop headers across origins', async () => {
   const res = await fetch(s.url + '/api/inbox/file', { method: 'OPTIONS', headers: { origin: 'http://127.0.0.1:7070' } });
   assert.match(res.headers.get('access-control-allow-headers'), /X-Drop-Name, X-Drop-Note, X-Drop-Canvas/);
 });
+
+test('a send from the composer: files with the user\'s description and message, all of it or none (t-e0f8a22b3a, t-fe28f948b4)', async () => {
+  const send = async (fields, files = []) => {
+    const fd = new FormData();
+    for (const [name, bytes] of files) fd.append('file', new Blob([bytes]), name);
+    for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+    const res = await fetch(s.url + '/api/inbox/send', { method: 'POST', headers: { 'x-notex-token': s.token }, body: fd });
+    return { status: res.status, body: await res.json() };
+  };
+  const count = async () => (await call('GET', '/api/inbox')).body.drops.length;
+
+  const r = await send({ description: 'the March invoice and my notes on it', message: 'make a totem named Money', canvas: 'Harness' },
+    [['March invoice.pdf', PDF], ['notes.md', Buffer.from('# Notes\n- paid late\n')]]);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.match(r.body.send, /^s-[0-9a-f]{10}$/);
+  assert.deepEqual(r.body.drops.map((d) => [d.name, d.send, d.note, d.ask, d.status, d.canvas]), [
+    ['March invoice.pdf', r.body.send, 'the March invoice and my notes on it', 'make a totem named Money', 'queued', 'Harness'],
+    ['notes.md', r.body.send, 'the March invoice and my notes on it', 'make a totem named Money', 'queued', 'Harness'],
+  ]);
+
+  // With no file, the description is what is kept.
+  const words = await send({ description: 'just words', message: '', canvas: '' });
+  assert.equal(words.body.drops.length, 1);
+  assert.deepEqual([words.body.drops[0].kind, words.body.drops[0].note, words.body.drops[0].preview, words.body.drops[0].status], ['text', null, 'just words', 'waiting']);
+
+  // One bad file and nothing of the send lands.
+  const before = await count();
+  const bad = await send({ description: 'two files' }, [['ok.pdf', PDF], ['fake.png', Buffer.from('not a picture')]]);
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.error.code, 'not-kind');
+  assert.equal(await count(), before);
+
+  // "As my message says" needs a message; then the drop is queued with no canvas.
+  assert.equal((await send({ description: 'x', byMessage: 'true' })).body.error.code, 'no-ask');
+  const by = await send({ description: 'x', message: 'a new canvas named Bills', byMessage: 'true' });
+  assert.deepEqual([by.body.drops[0].status, by.body.drops[0].canvas, by.body.drops[0].byMessage], ['queued', null, true]);
+  assert.equal((await send({ description: '  ', message: 'hello' })).body.error.code, 'empty');
+  assert.equal((await send({ description: 'x', canvas: 'Notes' })).status, 409);
+  const later = await call('PUT', `/api/inbox/${words.body.drops[0].id}/canvas`, { body: { byMessage: true } });
+  assert.equal(later.body.error.code, 'no-ask');
+});
