@@ -40,6 +40,7 @@ import { Bronze, BronzeError } from './bronze.js';
 import { AgentCanvases, isAgentCanvas } from './agentcanvas.js';
 import { Refusal } from './layout.js';
 import { Placer } from './placer.js';
+import { DropSync } from './dropsync.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -161,6 +162,9 @@ export async function startServer({
   // Canvases assigned to the agent are drawn from their scripts (t-0b88e8ea91).
   const agent = new AgentCanvases({ dataDir: dir, writer, bronze, log });
   writer.agent = agent;
+  // What is on an agent canvas goes on to RAGX after each render (t-7513cdd783).
+  const dropSync = new DropSync({ dataDir: dir, config, agent, bronze, log, ...(syncOptions.runtime ? { runtime: syncOptions.runtime } : {}) });
+  agent.onRendered = (canvas) => { dropSync.queue(canvas).catch((e) => log(`Sending ${canvas}'s drops failed: ${e.message}`)); };
   // Queued drops are placed by the agent, one at a time (t-c24e0494a2).
   const placer = new Placer({ config, dataDir: dir, bronze, writer, log, ...(syncOptions.placerRun ? { run: syncOptions.placerRun } : {}), ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
 
@@ -333,6 +337,7 @@ export async function startServer({
       const { on } = await readJson(req);
       if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
       if (on && !fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No fabric ${name} in the workspace.`);
+      if (on && isAgentCanvas(fdir)) throw new HttpError(409, 'agent-canvas', `${name} is an agent canvas: what is dropped on it reaches RAGX by itself, each drop as its own document.`);
       sync.set(name, on);
       return json(200, { name, on, sync: sync.report()[name] || null });
     }
@@ -405,6 +410,7 @@ export async function startServer({
   rules.start();
   writer.start();
   placer.start();
+  dropSync.start().catch((e) => log(`Sending drops failed: ${e.message}`));
 
   let stopped = null;
   function stop(reason = 'stopped') {
@@ -415,6 +421,7 @@ export async function startServer({
       await sync.stop();
       rules.stop();
       await placer.stop();
+      await dropSync.stop();
       await writer.stop();
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();

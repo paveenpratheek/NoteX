@@ -32,6 +32,24 @@ import { BronzeError } from './bronze.js';
 
 export const isAgentCanvas = (dir) => fs.existsSync(path.join(dir, 'agent.json'));
 
+/* Where a script puts each drop it names, as NoteX addresses places: a
+ * note's own address, or the box holding a text or file (t-b404914d8f). */
+const LABEL = { Note: ' (note)', ScrollBox: ' (scroll box)' };
+export function dropAddresses(parsed) {
+  const out = [];
+  const visit = (node, labels) => {
+    let page = 0;
+    for (const c of node.children || []) {
+      if (c.tag === 'Page') { visit(c, [...labels, `Page ${++page}`]); continue; }
+      const here = ['Area', 'Note', 'ScrollBox'].includes(c.tag) ? [...labels, c.attrs.name + (LABEL[c.tag] || '')] : labels;
+      if (c.attrs && c.attrs.drop) out.push({ id: c.attrs.drop, address: (c.tag === 'Note' ? here : labels).join(' > ') });
+      visit(c, here);
+    }
+  };
+  visit(parsed.totem, [`${parsed.totem.attrs.name} (totem)`]);
+  return out;
+}
+
 const CONTENT = ['drawings', 'areas', 'files', 'links', 'totems', 'tables'];
 const KIND = { areas: 'area', drawings: 'drawing', files: 'file' };
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -48,7 +66,11 @@ export class AgentCanvases {
   constructor({ dataDir, writer, bronze, log = () => {}, now = Date.now }) {
     Object.assign(this, { writer, bronze, log, now });
     this.root = path.join(dataDir, 'agent-canvases');
+    this.onRendered = null; // told the canvas's name after each render
   }
+
+  /* Every drop on the canvas now, with its address. */
+  placedDrops(canvas) { return this.layout(canvas).totems.flatMap((t) => t.drops || []); }
 
   dir(canvas) { return path.join(this.root, canvas); }
 
@@ -158,6 +180,7 @@ export class AgentCanvases {
       e.at = done.at;
       e.drawnFrom = done.which;
       e.text = done.text;
+      e.drops = dropAddresses(parseScript(done.text));
       out.written.push(...done.out.written);
       out.boxes.push(...done.out.boxes);
       out.texts.push(...done.out.texts);
@@ -198,13 +221,16 @@ export class AgentCanvases {
       }
       if (e.drawnFrom === 'new' || e.drawnFrom === 'current') fs.writeFileSync(path.join(dir, 'good', e.file), e.text);
     }
-    const layout = { totems: built.entries.map(({ name, file, owner, at }) => ({ name, file, owner: owner || null, at: at || null })) };
+    // A totem left out holds none of its drops on the canvas now.
+    const layout = { totems: built.entries.map(({ name, file, owner, at, drops }) => ({ name, file, owner: owner || null, at: at || null, drops: drops || [] })) };
     fs.writeFileSync(path.join(dir, 'layout.json'), JSON.stringify(layout, null, 2));
     for (const id of new Set(built.placed)) {
       try { if (this.bronze.get(id).status !== 'placed') this.bronze.mark(id, 'placed'); } catch (_) { /* forgotten meanwhile */ }
     }
     const left = built.totems.filter((t) => t.drawn !== 'current' && t.drawn !== 'new');
     if (left.length) this.log(`${canvas}: ${left.map((t) => `${t.totem} drawn from ${t.drawn === 'good' ? 'its last good script' : 'nothing'}`).join('; ')}.`);
+    // What is on the canvas now goes on to RAGX (t-7513cdd783).
+    if (this.onRendered) this.onRendered(canvas);
     return { ...result.report, totems: built.totems, placed: [...new Set(built.placed)] };
   }
 

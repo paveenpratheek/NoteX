@@ -19,6 +19,7 @@ import path from 'node:path';
 import { FabricError } from './fabric.js';
 import { readFabricImages } from './read.js';
 import { ragxFolder, ragxRuntime, addToRagx, RagxError } from './ragx.js';
+import { isAgentCanvas } from './agentcanvas.js';
 
 export const POLL_MS = 5_000;
 export const SETTLE_MS = 15_000;
@@ -53,7 +54,8 @@ export class AutoSync {
     return this.mem.get(name);
   }
 
-  watched() { return Object.keys(this.config.sync || {}); }
+  // An agent canvas reaches RAGX as its drops, never as a canvas document (t-083eed1f9f).
+  watched() { return Object.keys(this.config.sync || {}).filter((name) => !isAgentCanvas(path.dirname(this.file(name)))); }
 
   /* Switching on syncs the canvas as it is now, without waiting for its next edit. */
   set(name, on) {

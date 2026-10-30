@@ -24,7 +24,8 @@ before(async () => {
   fs.writeFileSync(path.join(workspace, 'Harness', 'agent.json'), JSON.stringify({ assignedAt: '2026-10-30T10:00:00Z' }));
   fs.mkdirSync(data, { recursive: true });
   // Placing stays off here: these tests queue drops, and nothing may reach Claude.
-  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ workspace, placing: false }));
+  // And RAGX is a folder with no engine in it, so no drop list reaches the user's own RAGX.
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ workspace, placing: false, ragx: path.join(tmp, 'no-ragx') }));
   s = await startServer({ dataDir: data, port: 0, runtimeFile: path.join(tmp, 'plugin', 'runtime.json'), log: () => {}, signals: false });
 });
 after(async () => { await s.stop(); fs.rmSync(tmp, { recursive: true, force: true }); });

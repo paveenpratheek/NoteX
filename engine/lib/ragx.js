@@ -42,6 +42,29 @@ export async function readImage(rt, buf, name, { ahead = 0 } = {}) {
   return res.json();
 }
 
+/* Ask RAGX to take an agent canvas's drop list, <canvas>.drops.json in
+ * NoteX's docs folder (Project Harness t-a3a1000832). */
+export async function sendDrops(rt, canvas) {
+  let res;
+  try {
+    res = await fetch(rt.url + '/api/notex/drops', {
+      method: 'POST',
+      headers: { 'x-rag-token': rt.token, 'x-rag-client': 'notex', 'content-type': 'application/json' },
+      body: JSON.stringify({ canvas }),
+    });
+  } catch (_) {
+    throw new RagxError('ragx-down', `RAGX's engine at ${rt.url} is not answering - start it from the RAGX page.`);
+  }
+  if (!res.ok) {
+    let err = {};
+    try { err = (await res.json()).error || {}; } catch (_) {}
+    throw new RagxError(err.code || String(res.status), res.status === 404
+      ? `RAGX does not see ${canvas}.drops.json - its NoteX folder (RAGX Settings) must be NoteX's docs folder.`
+      : `RAGX would not take ${canvas}'s drops: ${err.message || res.status}`);
+  }
+  return res.json();
+}
+
 /* Hand one canvas's document to RAGX's NoteX Add, which replaces its older
  * versions there itself. RAGX finds the file in its NoteX folder - NoteX's
  * docs/ beside it, unless RAGX's Settings name another. */
