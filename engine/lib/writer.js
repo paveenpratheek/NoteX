@@ -158,7 +158,8 @@ export class Writer {
     }
     const entry = {
       id: crypto.randomBytes(5).toString('hex'), canvas: parsed.canvas, owner: who, kind: parsed.kind,
-      what: parsed.kind === 'totem' ? `new totem ${parsed.totem.attrs.name}` : parsed.kind === 'add' ? `add to ${parsed.at}` : changesOf(parsed.edits),
+      // On an agent canvas a totem script replaces the totem of its name, or starts it (t-c42859ce48).
+      what: parsed.kind === 'totem' ? `${isAgentCanvas(this.canvasDir(parsed.canvas)) ? 'totem' : 'new totem'} ${parsed.totem.attrs.name}` : parsed.kind === 'add' ? `add to ${parsed.at}` : changesOf(parsed.edits),
       script, at: new Date(this.now()).toISOString(), status: 'waiting', result: null,
     };
     this.data.entries.push(entry);

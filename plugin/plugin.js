@@ -478,7 +478,32 @@ async function loadInbox() {
   $('drop-help').textContent = r.canvases.length
     ? 'A drop with no canvas waits here; one with a canvas is queued for the agent to place.'
     : 'Assign a canvas to the agent in CanvasX to send drops to it. Until then, everything you drop waits here, kept as it is.';
+  renderPlacer(r.placer, r.drops);
   renderDrops();
+  // While the agent has drops to place, the list follows it.
+  clearTimeout(loadInbox.timer);
+  if (S.tab === 'inbox' && r.drops.some((d) => d.status === 'queued' || d.status === 'placing')) loadInbox.timer = setTimeout(loadInbox, 4000);
+}
+
+/* The agent places queued drops with Claude, one at a time (t-c24e0494a2);
+ * the switch stops it, and the line says what it is doing or why it waits. */
+function renderPlacer(p, drops) {
+  const btn = $('placing-btn');
+  btn.setAttribute('aria-checked', String(p.on));
+  btn.title = p.on ? `The agent places each queued drop on its canvas, with Claude (${p.model}). Press to stop.` : 'Queued drops wait. Press to let the agent place them.';
+  const line = $('placer-line');
+  const doing = p.placing && drops.find((d) => d.id === p.placing);
+  const text = !p.on ? (drops.some((d) => d.status === 'queued') ? 'Placing is off: queued drops wait until you switch it on.' : '')
+    : p.held ? `Placing is paused for a few minutes: ${p.held}`
+      : doing ? `The agent is placing ${doing.name || 'your text'} on ${doing.canvas}…` : '';
+  line.hidden = !text;
+  line.textContent = text;
+  line.classList.toggle('bad', Boolean(p.on && p.held));
+}
+
+async function togglePlacing() {
+  const on = $('placing-btn').getAttribute('aria-checked') !== 'true';
+  try { await engine.setPlacing(on); toast(on ? 'The agent places queued drops again.' : 'Placing is off - queued drops wait.'); await loadInbox(); } catch (e) { toast(e.message, true); }
 }
 
 function renderDrops() {
@@ -606,6 +631,7 @@ $('view-browse').addEventListener('click', () => showTab('browse'));
 $('view-inbox').addEventListener('click', () => showTab('inbox'));
 $('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; keepFiles(files); });
 $('drop-keep').addEventListener('click', keepText);
+$('placing-btn').addEventListener('click', togglePlacing);
 $('drop-text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) keepText(); });
 const zone = $('drop-zone');
 zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });

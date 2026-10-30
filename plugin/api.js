@@ -82,4 +82,5 @@ export class Engine {
   }
   chooseCanvas(id, canvas) { return this.json('PUT', `/api/inbox/${encodeURIComponent(id)}/canvas`, { canvas }); }
   forgetDrop(id) { return this.json('POST', `/api/inbox/${encodeURIComponent(id)}/forget`); }
+  setPlacing(on) { return this.json('PUT', '/api/placer', { on }); }
 }

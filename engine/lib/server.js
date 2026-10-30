@@ -39,6 +39,7 @@ import { readOut } from './readout.js';
 import { Bronze, BronzeError } from './bronze.js';
 import { AgentCanvases, isAgentCanvas } from './agentcanvas.js';
 import { Refusal } from './layout.js';
+import { Placer } from './placer.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -160,6 +161,8 @@ export async function startServer({
   // Canvases assigned to the agent are drawn from their scripts (t-0b88e8ea91).
   const agent = new AgentCanvases({ dataDir: dir, writer, bronze, log });
   writer.agent = agent;
+  // Queued drops are placed by the agent, one at a time (t-c24e0494a2).
+  const placer = new Placer({ config, dataDir: dir, bronze, writer, log, ...(syncOptions.placerRun ? { run: syncOptions.placerRun } : {}), ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
 
   /* The canvases assigned to the agent: those whose folder holds the
    * agent.json CanvasX writes. Only they take drops (t-52f040cf72). */
@@ -202,11 +205,20 @@ export async function startServer({
     if (m('GET', /^\/api\/state$/)) {
       const drops = bronze.list();
       const inbox = { drops: drops.length, waiting: drops.filter((d) => d.status === 'waiting').length };
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), inbox, ...workspaceState() });
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), inbox, placer: placer.report(), ...workspaceState() });
+    }
+    /* Whether the agent places queued drops by itself; off, they wait in the queue. */
+    if (m('PUT', /^\/api\/placer$/)) {
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
+      config.placing = on;
+      saveConfig();
+      if (on) placer.tick();
+      return json(200, { placer: placer.report() });
     }
     /* The Inbox: drops kept in bronze until the user picks an agent canvas
      * for them (t-85f3ec23ef, t-0f32cb63f2). */
-    if (m('GET', /^\/api\/inbox$/)) return json(200, { drops: bronze.list().map(shown), canvases: agentCanvases() });
+    if (m('GET', /^\/api\/inbox$/)) return json(200, { drops: bronze.list().map(shown), canvases: agentCanvases(), placer: placer.report() });
     if (m('POST', /^\/api\/inbox\/text$/)) {
       const body = await readJson(req, MAX_TEXT_JSON);
       if (typeof body.text !== 'string') throw new HttpError(400, 'bad-body', 'Send {"text": "...", "note": "...", "canvas": "..."}.');
@@ -392,6 +404,7 @@ export async function startServer({
   sync.start();
   rules.start();
   writer.start();
+  placer.start();
 
   let stopped = null;
   function stop(reason = 'stopped') {
@@ -401,6 +414,7 @@ export async function startServer({
       log(`Stopping (${reason})...`);
       await sync.stop();
       rules.stop();
+      await placer.stop();
       await writer.stop();
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();

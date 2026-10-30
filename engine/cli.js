@@ -14,6 +14,7 @@ import { Bronze, BronzeError } from './lib/bronze.js';
 import { Writer } from './lib/writer.js';
 import { AgentCanvases } from './lib/agentcanvas.js';
 import { Refusal } from './lib/layout.js';
+import { Placer } from './lib/placer.js';
 
 const USAGE = `usage: node engine/cli.js <command>
 
@@ -36,7 +37,10 @@ const USAGE = `usage: node engine/cli.js <command>
   forget <drop id> --data-dir <folder>
                           remove a drop from the inbox for good
   render <canvas> --data-dir <folder>
-                          draw an agent canvas again from its totem scripts`;
+                          draw an agent canvas again from its totem scripts
+  place --data-dir <folder> [--model sonnet]
+                          have the agent place the oldest queued drop now,
+                          with Claude Code (stop the engine first)`;
 
 class UsageError extends Error {}
 
@@ -146,14 +150,25 @@ async function main(argv) {
       console.log(line(bronze.land({ bytes: fs.readFileSync(rest[0]), name: rest[0], ...common })));
       return 0;
     }
-    case 'render': {
-      if (!rest[0]) throw new UsageError('render needs the agent canvas\'s name.');
+    case 'render': case 'place': {
+      if (command === 'render' && !rest[0]) throw new UsageError('render needs the agent canvas\'s name.');
       if (!opts['data-dir']) throw new UsageError('Give NoteX\'s data folder, which knows the workspace: --data-dir <folder>');
       let config = {};
       try { config = JSON.parse(fs.readFileSync(path.join(opts['data-dir'], 'config.json'), 'utf8')); } catch (_) { /* no workspace yet */ }
       const writer = new Writer({ config, dataDir: opts['data-dir'] });
-      const agent = new AgentCanvases({ dataDir: opts['data-dir'], writer, bronze: new Bronze(opts['data-dir']), log: (m) => console.log(m) });
+      const bronze = new Bronze(opts['data-dir']);
+      const agent = new AgentCanvases({ dataDir: opts['data-dir'], writer, bronze, log: (m) => console.log(m) });
       writer.agent = agent;
+      if (command === 'place') {
+        if (opts.model) config.placer = { ...(config.placer || {}), model: opts.model };
+        const placer = new Placer({ config: { ...config, placing: true }, dataDir: opts['data-dir'], bronze, writer, log: (m) => console.log(m) });
+        const d = placer.next();
+        if (!d) { console.log('No drop is queued for a canvas assigned to the agent.'); return 0; }
+        console.log(`Placing ${d.name || d.id} on ${d.canvas} with Claude (${(config.placer && config.placer.model) || 'sonnet'})...`);
+        const r = await placer.place(d);
+        console.log(r.status === 'placed' ? `Placed: ${r.entry.what}.` : `${r.status}${r.reason ? `: ${r.reason}` : ''}`);
+        return r.status === 'placed' ? 0 : 1;
+      }
       const r = agent.render(rest[0]);
       if (r === null) { console.log(`${rest[0]} changed while it was being drawn - run it again.`); return 1; }
       for (const t of r.totems) console.log(`${t.drawn === 'current' ? '✓' : t.drawn === 'good' ? '~' : '✗'} ${t.totem}${t.drawn === 'good' ? ' (from its last good script)' : t.drawn === 'none' ? ' (left out)' : ''}${t.errors.length ? ` - ${t.errors.join('; ')}` : ''}`);

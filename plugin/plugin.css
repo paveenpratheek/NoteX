@@ -254,6 +254,9 @@ button.switch[aria-checked="true"]::before { background: var(--accent); }
 .drop-zone:focus-within { outline: 2px solid var(--acc-soft); }
 .drop-sheet textarea { min-height: 120px; resize: vertical; }
 .drop-sheet .row select { flex: 1; min-width: 0; }
+.drops-sheet .sheet-head { gap: 8px; }
+.drops-sheet .sheet-head .note { margin-left: auto; }
+.drops-sheet .sheet-head .switch { font-size: 12.5px; min-height: 30px; }
 .drops { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .drops .empty { padding: 6px; }
 .drop { padding: 9px 12px; }

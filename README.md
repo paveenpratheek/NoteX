@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-101%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -118,6 +118,7 @@ Later scripts can change the agent's own work:
 - The canvas is drawn from one totem script per totem. An agent changes a totem by sending its whole script again, and the new version is kept only if the canvas still draws with it. Every earlier version is kept, along with the last one that drew.
 - Totems stay where they were first placed; one that grows wider pushes the totems after it. A script that stops drawing is drawn from its last good version, so one broken totem never takes the others with it.
 - Scripts name Inbox drops by id, so the content stays in one place. A drop placed this way is marked placed.
+- **The agent places drops by itself.** Once you pick a drop's canvas, NoteX shows Claude Code (headless, with no tools) the canvas's scripts and the drop, and takes back one totem script. The script must place the drop and keep everything its totem already held, word for word, or Claude is asked once more with the reason. A switch on the Inbox turns placing off.
 
 **Rules canvas**
 - Mark one canvas as your rules. NoteX writes your own typed words from it to `rules.md`, and one import line in `~/.claude/CLAUDE.md` gives every Claude Code session those rules. Only the user's words go in; agents are refused on this canvas.
@@ -145,7 +146,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 101, all passing, in ~2,150 lines |
+| Tests | 111, all passing, in ~2,300 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 
@@ -170,6 +171,7 @@ npm run notex -- build "<workspace>/<canvas>"              # print one canvas's 
 npm run notex -- build "<workspace>" --out ./docs          # a whole workspace
 npm run notex -- serve --data-dir ./data                   # the page's engine on 127.0.0.1:7781
 npm run notex -- render "<agent canvas>" --data-dir ./data  # draw an agent canvas again from its scripts
+npm run notex -- place --data-dir ./data                   # place the oldest queued drop now
 ```
 
 ### As a ter-manager plugin
@@ -204,6 +206,8 @@ engine/
     agentrules.js   rules canvas → rules.md
     bronze.js       the inbox: drops kept as they arrived, and forgotten on request
     agentcanvas.js  agent canvases drawn from one script per totem, with versions
+    placer.js       the agent places queued drops, with Claude Code headless
+    claude.js       runs Claude Code: no shell, no tools, no API keys
     script.js       totem script parser
     measure.js      sizes as File Fabric draws them
     layout.js       the layout engine

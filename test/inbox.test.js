@@ -23,7 +23,8 @@ before(async () => {
   // Harness is assigned to the agent the way CanvasX marks it; Notes is the user's.
   fs.writeFileSync(path.join(workspace, 'Harness', 'agent.json'), JSON.stringify({ assignedAt: '2026-10-30T10:00:00Z' }));
   fs.mkdirSync(data, { recursive: true });
-  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ workspace }));
+  // Placing stays off here: these tests queue drops, and nothing may reach Claude.
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ workspace, placing: false }));
   s = await startServer({ dataDir: data, port: 0, runtimeFile: path.join(tmp, 'plugin', 'runtime.json'), log: () => {}, signals: false });
 });
 after(async () => { await s.stop(); fs.rmSync(tmp, { recursive: true, force: true }); });
@@ -41,7 +42,9 @@ const file = (bytes, name, extra = {}) => call('POST', '/api/inbox/file', { byte
 test('the inbox offers only the canvases assigned to the agent', async () => {
   const r = await call('GET', '/api/inbox');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { drops: [], canvases: ['Harness'] });
+  assert.deepEqual(r.body.drops, []);
+  assert.deepEqual(r.body.canvases, ['Harness']);
+  assert.equal(r.body.placer.on, false);
 });
 
 test('a file comes as its bytes, with its name and note in headers, and waits for a canvas', async () => {
@@ -112,6 +115,14 @@ test('an agent canvas is written by whole totem scripts, read back as its script
   assert.equal(r.status, 200);
   assert.deepEqual(r.body.totems, [{ totem: 'RAGX', drawn: 'current', errors: [] }]);
   assert.equal((await call('POST', '/api/fabrics/Notes/render')).status, 409);
+});
+
+test('placing is switched on and off from the page, and kept in the config', async () => {
+  assert.equal((await call('PUT', '/api/placer', { body: { on: 'yes' } })).status, 400);
+  const r = await call('PUT', '/api/placer', { body: { on: false } });
+  assert.equal(r.body.placer.on, false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).placing, false);
+  assert.equal((await call('GET', '/api/state')).body.placer.on, false);
 });
 
 test('the page may send the drop headers across origins', async () => {
