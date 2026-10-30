@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-91%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-101%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -88,9 +88,9 @@ Later scripts can change the agent's own work:
 | `<Canvas>` | the canvas to write on; created if it doesn't exist |
 | `<Totem>` | a named group, the agent's own; one per script |
 | `<Area>` | a box that holds other items |
-| `<Note>` | a note card, with `- [ ]` checklists |
+| `<Note>` | a note card, with `- [ ]` checklists; `drop="d-..."` takes its words from the Inbox |
 | `<Text>` | free text |
-| `<File>` | a file or image, copied into the canvas |
+| `<File>` | a file or image, copied into the canvas; `drop="d-..."` places a PDF, Word file or image from the Inbox |
 | `<Row>` / `<Column>` | side by side / stacked inside a row |
 | `<Link>` | joins two boxes corner to corner, as the app's own links do |
 | `<Line>` | draws a line only |
@@ -113,6 +113,11 @@ Later scripts can change the agent's own work:
 **Inbox** (the first layer of the data pipeline, in progress)
 - Drop files (text, Markdown, PDF, Word, images) or type text on the page's Inbox, or use `npm run notex -- drop`. Each drop is checked to be what its name says and kept exactly as it arrived, stored once by its SHA-256.
 - A drop waits until you pick a canvas assigned to the agent. Forgetting a drop removes it for good, and the erasure log keeps no content.
+
+**Agent canvases** (assigned to the agent in CanvasX)
+- The canvas is drawn from one totem script per totem. An agent changes a totem by sending its whole script again, and the new version is kept only if the canvas still draws with it. Every earlier version is kept, along with the last one that drew.
+- Totems stay where they were first placed; one that grows wider pushes the totems after it. A script that stops drawing is drawn from its last good version, so one broken totem never takes the others with it.
+- Scripts name Inbox drops by id, so the content stays in one place. A drop placed this way is marked placed.
 
 **Rules canvas**
 - Mark one canvas as your rules. NoteX writes your own typed words from it to `rules.md`, and one import line in `~/.claude/CLAUDE.md` gives every Claude Code session those rules. Only the user's words go in; agents are refused on this canvas.
@@ -140,7 +145,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 91, all passing, in ~1,950 lines |
+| Tests | 101, all passing, in ~2,150 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 
@@ -164,6 +169,7 @@ npm run notex -- fabrics "<workspace folder>"              # canvases, newest fi
 npm run notex -- build "<workspace>/<canvas>"              # print one canvas's document
 npm run notex -- build "<workspace>" --out ./docs          # a whole workspace
 npm run notex -- serve --data-dir ./data                   # the page's engine on 127.0.0.1:7781
+npm run notex -- render "<agent canvas>" --data-dir ./data  # draw an agent canvas again from its scripts
 ```
 
 ### As a ter-manager plugin
@@ -197,6 +203,7 @@ engine/
     sync.js         Keep in RAGX auto-sync
     agentrules.js   rules canvas → rules.md
     bronze.js       the inbox: drops kept as they arrived, and forgotten on request
+    agentcanvas.js  agent canvases drawn from one script per totem, with versions
     script.js       totem script parser
     measure.js      sizes as File Fabric draws them
     layout.js       the layout engine

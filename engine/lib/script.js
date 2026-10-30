@@ -44,9 +44,10 @@ const TAGS = {
   Remove: { attrs: { id: true }, holds: 'nothing' },
   Totem: { attrs: { name: true }, holds: 'tags' },
   Area: { attrs: { name: true }, holds: 'tags' },
-  Note: { attrs: { name: true }, holds: 'text' },
-  Text: { attrs: { size: false }, holds: 'text' },
-  File: { attrs: { path: true }, holds: 'nothing' },
+  // drop="d-..." names something the user dropped in the Inbox, placed from bronze (t-2fa309e6c8).
+  Note: { attrs: { name: true, drop: false }, holds: 'text' },
+  Text: { attrs: { size: false, drop: false }, holds: 'text' },
+  File: { attrs: { path: false, drop: false }, holds: 'nothing' },
   Line: { attrs: { from: true, to: true }, holds: 'nothing' },
   Link: { attrs: { from: true, to: true }, holds: 'nothing' },
   Row: { attrs: {}, holds: 'tags' },
@@ -240,12 +241,20 @@ function build(tokens) {
   return root;
 }
 
+export const DROP_ID = /^d-[0-9a-f]{10}$/;
+
 function finish(node) {
   const spec = TAGS[node.tag];
+  const drop = node.attrs.drop;
+  if (drop !== undefined && !DROP_ID.test(drop)) throw new ScriptError(`drop="${drop}" is not a drop id - they look like d-0123456789; the Inbox lists them.`, node.line, node.col);
   if (spec.holds === 'text') {
     node.text = dedent(node.parts.join(''));
     if (node.text.length > LIMITS.text) throw new ScriptError(`<${node.tag}> holds more than ${LIMITS.text} characters.`, node.line, node.col);
-    if (node.tag !== 'Edit' && !node.text.trim()) throw new ScriptError(`<${node.tag}> is empty.`, node.line, node.col);
+    if (drop !== undefined && node.text.trim()) throw new ScriptError(`<${node.tag} drop> takes its words from the drop - leave it empty, e.g. <${node.tag}${node.tag === 'Note' ? ' name="..."' : ''} drop="${drop}"/>.`, node.line, node.col);
+    if (node.tag !== 'Edit' && drop === undefined && !node.text.trim()) throw new ScriptError(`<${node.tag}> is empty.`, node.line, node.col);
+  }
+  if (node.tag === 'File' && !node.attrs.path === (drop === undefined)) {
+    throw new ScriptError(drop === undefined ? '<File> needs path="..." - or drop="d-..." for something in the Inbox.' : '<File> takes path or drop, not both.', node.line, node.col);
   }
   delete node.parts;
   if (node.tag === 'Text' && node.attrs.size !== undefined) {

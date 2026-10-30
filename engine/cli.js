@@ -11,6 +11,9 @@ import { writeLocal, REPO } from './lib/lifecycle.js';
 import { readFabricImages } from './lib/read.js';
 import { RagxError } from './lib/ragx.js';
 import { Bronze, BronzeError } from './lib/bronze.js';
+import { Writer } from './lib/writer.js';
+import { AgentCanvases } from './lib/agentcanvas.js';
+import { Refusal } from './lib/layout.js';
 
 const USAGE = `usage: node engine/cli.js <command>
 
@@ -31,7 +34,9 @@ const USAGE = `usage: node engine/cli.js <command>
                           with no --canvas it waits for one
   drops --data-dir <folder>       the inbox, newest first
   forget <drop id> --data-dir <folder>
-                          remove a drop from the inbox for good`;
+                          remove a drop from the inbox for good
+  render <canvas> --data-dir <folder>
+                          draw an agent canvas again from its totem scripts`;
 
 class UsageError extends Error {}
 
@@ -141,13 +146,27 @@ async function main(argv) {
       console.log(line(bronze.land({ bytes: fs.readFileSync(rest[0]), name: rest[0], ...common })));
       return 0;
     }
+    case 'render': {
+      if (!rest[0]) throw new UsageError('render needs the agent canvas\'s name.');
+      if (!opts['data-dir']) throw new UsageError('Give NoteX\'s data folder, which knows the workspace: --data-dir <folder>');
+      let config = {};
+      try { config = JSON.parse(fs.readFileSync(path.join(opts['data-dir'], 'config.json'), 'utf8')); } catch (_) { /* no workspace yet */ }
+      const writer = new Writer({ config, dataDir: opts['data-dir'] });
+      const agent = new AgentCanvases({ dataDir: opts['data-dir'], writer, bronze: new Bronze(opts['data-dir']), log: (m) => console.log(m) });
+      writer.agent = agent;
+      const r = agent.render(rest[0]);
+      if (r === null) { console.log(`${rest[0]} changed while it was being drawn - run it again.`); return 1; }
+      for (const t of r.totems) console.log(`${t.drawn === 'current' ? '✓' : t.drawn === 'good' ? '~' : '✗'} ${t.totem}${t.drawn === 'good' ? ' (from its last good script)' : t.drawn === 'none' ? ' (left out)' : ''}${t.errors.length ? ` - ${t.errors.join('; ')}` : ''}`);
+      console.log(`${rest[0]}: ${r.written} items drawn; backup ${r.backup}`);
+      return r.totems.some((t) => t.drawn === 'none') ? 1 : 0;
+    }
     default:
       throw new UsageError(`Unknown command "${command}".\n\n${USAGE}`);
   }
 }
 
 main(process.argv.slice(2)).then((code) => { if (code !== null) process.exitCode = code; }, (e) => {
-  if (e instanceof UsageError || e instanceof FabricError || e instanceof RagxError || e instanceof BronzeError) { console.error(e.message); process.exitCode = 2; return; }
+  if (e instanceof UsageError || e instanceof FabricError || e instanceof RagxError || e instanceof BronzeError || e instanceof Refusal) { console.error(e.message); process.exitCode = 2; return; }
   console.error(e.stack || e.message);
   process.exitCode = 1;
 });

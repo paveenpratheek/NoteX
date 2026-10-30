@@ -27,6 +27,7 @@ import { readFabric, FabricError } from './fabric.js';
 import { buildPlaces, plainText } from './places.js';
 import { parseScript, ScriptError } from './script.js';
 import { layoutTotem, layoutAdd, layoutEdits, growOverflows, Refusal, textHtml } from './layout.js';
+import { isAgentCanvas } from './agentcanvas.js';
 
 export const LOCK_STALE_MS = 30_000;
 const POLL_MS = 5_000;
@@ -81,6 +82,7 @@ export class Writer {
     try { Object.assign(this.data, JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch (_) { /* first start */ }
     this.chain = Promise.resolve();
     this.timer = null;
+    this.agent = null; // the AgentCanvases that draws canvases assigned to the agent, once set
   }
 
   start() {
@@ -203,6 +205,8 @@ export class Writer {
     if (this.config.rules && entry.canvas.toLowerCase() === String(this.config.rules).toLowerCase()) {
       return this.finish(entry, 'refused', { message: `${entry.canvas} became the rules canvas while this waited - agents never write on it.` });
     }
+    // A canvas assigned to the agent is drawn from its scripts, not written item by item (t-c42859ce48).
+    if (this.agent && isAgentCanvas(dir)) return this.agent.apply(entry);
     const parsed = parseScript(entry.script);
     if (!fs.existsSync(path.join(dir, 'fabric.json'))) {
       if (parsed.kind !== 'totem') return this.finish(entry, 'refused', { message: `There is no canvas called ${entry.canvas} in File Fabric's workspace.` });

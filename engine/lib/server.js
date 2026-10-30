@@ -37,6 +37,8 @@ import { RulesFile } from './agentrules.js';
 import { Writer } from './writer.js';
 import { readOut } from './readout.js';
 import { Bronze, BronzeError } from './bronze.js';
+import { AgentCanvases, isAgentCanvas } from './agentcanvas.js';
+import { Refusal } from './layout.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -56,6 +58,7 @@ class HttpError extends Error {
 function statusOf(e) {
   if (e instanceof HttpError) return e.status;
   if (e instanceof BronzeError) return e.code === 'no-drop' ? 404 : e.code === 'placed' ? 409 : 400;
+  if (e instanceof Refusal) return 409;
   if (e instanceof FabricError) return e.code === 'not-found' || e.code === 'no-workspace' ? 404 : e.code === 'bad-json' ? 409 : 500;
   if (e instanceof RagxError) return 503;
   return 500;
@@ -154,6 +157,9 @@ export async function startServer({
   const rules = new RulesFile({ config, saveConfig, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
   const writer = new Writer({ config, dataDir: dir, log, ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
   const bronze = new Bronze(dir);
+  // Canvases assigned to the agent are drawn from their scripts (t-0b88e8ea91).
+  const agent = new AgentCanvases({ dataDir: dir, writer, bronze, log });
+  writer.agent = agent;
 
   /* The canvases assigned to the agent: those whose folder holds the
    * agent.json CanvasX writes. Only they take drops (t-52f040cf72). */
@@ -263,7 +269,7 @@ export async function startServer({
         let counts = { images: null, unread: null };
         try { const b = buildFabric(fdir, { dataDir: dir }); counts = { images: b.images, unread: b.unread }; } catch (_) { /* shown without counts */ }
         // Whether File Fabric has it open: a script for it waits until it is closed (t-a80b904d43).
-        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name, open: writer.isOpen(fdir) };
+        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name, open: writer.isOpen(fdir), agent: isAgentCanvas(fdir) };
       });
       return json(200, { workspace: needWorkspace(), fabrics });
     }
@@ -273,6 +279,14 @@ export async function startServer({
       const name = decodeURIComponent(p[0]);
       const fdir = fabricDir(needWorkspace(), name);
       const at = url.searchParams.get('at') || null;
+      if (isAgentCanvas(fdir)) {
+        // An agent canvas is its scripts: they are what an agent reads and sends back changed (t-c42859ce48).
+        const want = at ? at.split('>')[0].replace(/\(totem\)/i, '').trim().toLowerCase() : null;
+        const all = agent.scripts(name).filter((s) => s.script && (!want || s.name.toLowerCase() === want));
+        if (at && !all.length) throw new HttpError(404, 'no-place', `No totem on ${name} matches "${at}".`);
+        const head = `<!-- ${name} is an agent canvas, drawn from one script per totem. To change a totem, send its whole script again. -->`;
+        return json(200, { name, at, agent: true, script: [head, ...all.map((s) => s.script.trim())].join('\n\n') || head, open: false, waiting: 0 });
+      }
       const script = readOut(readFabric(fdir), { at, ledger: writer.ledger(name) });
       if (script === null) throw new HttpError(404, 'no-place', `No place on ${name} has the address "${at}".`);
       const waiting = (writer.report()[name] || { waiting: [] }).waiting.length;
@@ -281,6 +295,14 @@ export async function startServer({
     if ((p = m('GET', /^\/api\/fabrics\/([^/]+)$/))) {
       const name = decodeURIComponent(p[0]);
       return json(200, { name, ...buildAndKeep(name), sync: sync.report()[name] || null, rules: rules.report() });
+    }
+    /* An agent canvas drawn again from its scripts, e.g. after a script file was mended by hand. */
+    if ((p = m('POST', /^\/api\/fabrics\/([^/]+)\/render$/))) {
+      const name = decodeURIComponent(p[0]);
+      fabricDir(needWorkspace(), name);
+      const r = await writer.serial(() => agent.render(name));
+      if (r === null) throw new HttpError(409, 'busy', `${name} changed while it was being drawn - try again.`);
+      return json(200, { name, ...r });
     }
     /* The rules canvas: marked, it is written to rules.md now and after each save. */
     if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/rules$/))) {

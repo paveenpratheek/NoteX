@@ -127,7 +127,7 @@ export class Scene {
   }
 }
 
-function move(it, dx, dy) {
+export function move(it, dx, dy) {
   const p = (pt) => { pt.x += dx; pt.y += dy; };
   if (it.polygons) it.polygons.forEach((poly) => poly && poly.forEach(p));
   if (it.points) it.points.forEach(p);
@@ -246,7 +246,8 @@ function resolveFile(node, opts) {
   if (path.isAbsolute(given)) {
     if (!fs.existsSync(given) || !fs.statSync(given).isFile()) throw new Refusal(`no file at ${given}.`, node);
     src = given;
-    name = path.basename(given);
+    // A drop's bytes sit in bronze under their hash; on the canvas it keeps the name it was dropped with.
+    name = node.as || path.basename(given);
   } else {
     name = given;
     if (/[\\/]/.test(given) || !sources || !fs.existsSync(path.join(sources, given))) {

@@ -56,6 +56,9 @@ const FORMAT = [
   // A note is at most 420 px, so lines broken by hand break again (t-c60e2fff9d).
   'Write each note item as one whole line and let File Fabric wrap it: a note is at most 420 px wide, so a line broken by hand breaks again.',
   'Write < as &lt; and & as &amp; in text, or wrap text in <![CDATA[ ... ]]>. Two boxes side by side need different names.',
+  // An agent canvas is drawn from one script per totem (t-c42859ce48); drops come from the Inbox (t-2fa309e6c8).
+  'On an agent canvas (notex_canvases marks them) the scripts are the canvas: notex_read gives each totem\'s whole script. To change a totem, send its whole <Canvas><Totem> script again with your change - it replaces the old one; <Add>, <Edit> and <Remove> are refused there.',
+  'Something the user dropped in NoteX\'s Inbox is placed by its drop id: <Note name="..." drop="d-..."/> or <Text drop="d-..."/> for typed text and Markdown, <File drop="d-..."/> for a PDF, Word file or image - only on the agent canvas the user chose for that drop.',
 ].join('\n');
 
 const INSTRUCTIONS = [
@@ -140,7 +143,13 @@ function told(entry) {
     if (r.moved) lines.push(`${plural(r.moved, 'item')} of yours moved or grown to make room.`);
     if (r.copies && r.copies.length) lines.push(`Copied onto the canvas: ${r.copies.join(', ')}.`);
     lines.push(`Overlap check: nothing it wrote overlaps anything${r.check && r.check.already ? ` (the canvas already had ${plural(r.check.already, 'overlap')} of the user's own, left as they are)` : ''}.`);
-    lines.push('notex_read shows the ids of every text and file for <Edit>.');
+    if (r.totems) {
+      // An agent canvas was drawn again from all its scripts.
+      const off = r.totems.filter((t) => t.drawn === 'good' || t.drawn === 'none');
+      for (const t of off) lines.push(`${t.totem}: ${t.drawn === 'good' ? 'drawn from its last good script' : 'left out'} - ${t.errors.join('; ')}`);
+      if (r.placed && r.placed.length) lines.push(`Placed from the Inbox: ${r.placed.join(', ')}.`);
+      lines.push(`${entry.canvas} is an agent canvas: change a totem by sending its whole script again.`);
+    } else lines.push('notex_read shows the ids of every text and file for <Edit>.');
     return ok(lines.join('\n'));
   }
   if (entry.status === 'waiting') {
@@ -158,6 +167,7 @@ async function call(name, a = {}) {
         const bits = [`saved ${f.modified.slice(0, 16).replace('T', ' ')} UTC`];
         if (f.open) bits.push('open in File Fabric now - scripts wait');
         if (f.rules) bits.push('the rules canvas - never write on it');
+        if (f.agent) bits.push('an agent canvas - drawn from its totem scripts; send whole <Totem> scripts');
         const s = canvases[f.name];
         if (s && s.waiting.length) bits.push(`${plural(s.waiting.length, 'script')} waiting: ${s.waiting.map((w) => `${w.what} by ${w.owner}`).join('; ')}`);
         const out = [`- ${f.name} (${bits.join(', ')})`];

@@ -95,6 +95,25 @@ test('a drop forgotten from the page is gone for good', async () => {
   assert.equal((await call('POST', `/api/inbox/${pdf.id}/forget`)).status, 404);
 });
 
+test('an agent canvas is written by whole totem scripts, read back as its scripts, and drawn again on request', async () => {
+  const words = (await call('POST', '/api/inbox/text', { body: { text: 'Check the reader on page renders', canvas: 'Harness' } })).body.drop;
+  const script = `<Canvas name="Harness"><Totem name="RAGX"><Area name="Bugs"><Note name="Figures" drop="${words.id}"/></Area></Totem></Canvas>`;
+  const w = await call('POST', '/api/scripts', { body: { script, owner: 'claude' } });
+  assert.equal(w.body.entry.status, 'written', JSON.stringify(w.body.entry.result));
+  assert.deepEqual(w.body.entry.result.placed, [words.id]);
+  const read = (await call('GET', '/api/fabrics/Harness/script')).body;
+  assert.equal(read.agent, true);
+  assert.match(read.script, /^<!-- Harness is an agent canvas/);
+  assert.ok(read.script.includes(`<Note name="Figures" drop="${words.id}"/>`), 'the script as sent, not a read-out with ids');
+  assert.equal((await call('GET', '/api/fabrics/Harness/script?at=' + encodeURIComponent('Nothing (totem)'))).status, 404);
+  const list = (await call('GET', '/api/fabrics')).body.fabrics;
+  assert.deepEqual(list.map((f) => [f.name, f.agent]).sort(), [['Harness', true], ['Notes', false]]);
+  const r = await call('POST', '/api/fabrics/Harness/render');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.totems, [{ totem: 'RAGX', drawn: 'current', errors: [] }]);
+  assert.equal((await call('POST', '/api/fabrics/Notes/render')).status, 409);
+});
+
 test('the page may send the drop headers across origins', async () => {
   const res = await fetch(s.url + '/api/inbox/file', { method: 'OPTIONS', headers: { origin: 'http://127.0.0.1:7070' } });
   assert.match(res.headers.get('access-control-allow-headers'), /X-Drop-Name, X-Drop-Note, X-Drop-Canvas/);
