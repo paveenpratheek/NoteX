@@ -507,6 +507,8 @@ async function loadInbox() {
 const MODEL_LABEL = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
 function modelSelect(sel, models, current) {
   const keep = sel.value;
+  // An engine older than this page sends no models: no empty picker then.
+  sel.hidden = !(models && models.length);
   sel.replaceChildren(...(models || []).map((m) => new Option(MODEL_LABEL[m] || m, m)));
   sel.value = current || keep;
 }
@@ -755,8 +757,18 @@ function renderAsk(name, c) {
   sel.dataset.canvas = name;
   const a = c.ask;
   const working = Boolean(a && a.status === 'working');
-  $('ask-btn').disabled = working;
   const line = $('ask-line');
+  // The page is served from the plugin folder, so it can be newer than the engine running.
+  if (!c.models) {
+    sel.hidden = true;
+    delete sel.dataset.canvas; // filled again once the engine answers with its models
+    $('ask-btn').disabled = true;
+    line.hidden = false;
+    line.classList.add('bad');
+    line.textContent = 'NoteX\'s engine is older than this page. Restart it from the ⋯ menu (Stop engine, then Start engine) to ask the agent.';
+    return;
+  }
+  $('ask-btn').disabled = working;
   line.hidden = !a;
   line.classList.toggle('bad', Boolean(a && a.status === 'failed'));
   if (a) {

@@ -288,7 +288,8 @@ button.switch[aria-checked="true"]::before { background: var(--accent); }
 .ask-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .ask-box:not([hidden]) { display: flex; }
 .ask-box textarea { min-height: 64px; resize: vertical; }
-.ask-box .row select { flex: 1; min-width: 0; }
+.ask-box .row { justify-content: flex-end; }
+.ask-box .row select { flex: none; width: auto; min-width: 110px; }
 .ask-box #ask-line.bad { color: var(--red); }
 .drops-sheet .sheet-head .model-select { min-height: 30px; font-size: 12.5px; padding-top: 2px; padding-bottom: 2px; }
 #agent-body:not([hidden]) { display: flex; }
