@@ -24,13 +24,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { parseScript, ScriptError, LIMITS } from './script.js';
-import { layoutTotem, Refusal, FREE, move } from './layout.js';
+import { layoutTotem, Refusal, move } from './layout.js';
 import { visualBox } from './measure.js';
 import { bboxDistance } from './geometry.js';
+import { magneticTotems, FIELD, CHAIN } from './rules.js';
 import { FabricError } from './fabric.js';
 import { BronzeError } from './bronze.js';
 
 export const isAgentCanvas = (dir) => fs.existsSync(path.join(dir, 'agent.json'));
+
+/* How far apart totems stay on an agent canvas: past CanvasX's grouping
+ * reach - 500 round a totem's marker and 300 between items - with 400 to
+ * spare, so no two totems' fields touch (t-7cf455550f, t-5c984630aa). */
+export const TOTEM_GAP = FIELD + CHAIN + 400;
+const SPACING_ROUNDS = 20;
 
 /* Where a script puts each drop it names, as NoteX addresses places: a
  * note's own address, or the box holding a text or file (t-b404914d8f). */
@@ -251,6 +258,14 @@ export class AgentCanvases {
 
   /* -------------------------------------------------------------- render */
 
+  /* What CanvasX groups a totem by: its items' boxes and its marker, a
+   * point. An empty totem is its marker alone. */
+  reachOf(state, mine) {
+    const items = Object.entries(KIND).flatMap(([k, kind]) => (state[k] || []).filter((x) => mine.has(x.id)).map((x) => visualBox(x, kind)));
+    const marker = (state.totems || []).find((x) => mine.has(x.id));
+    return union([...items, marker ? { minX: marker.x, minY: marker.y, maxX: marker.x, maxY: marker.y } : null]);
+  }
+
   /* One totem drawn onto the state: laid out where NoteX puts a new totem,
    * then moved to its pin, clear of the totems drawn before it. */
   drawOne(canvas, fabricDir, state, text, entry, drawn) {
@@ -262,18 +277,22 @@ export class AgentCanvases {
     const out = layoutTotem(parsed, state, { owner: entry.owner || 'agent', fabricDir });
     const mine = new Set(out.written);
     const items = Object.entries(KIND).flatMap(([k, kind]) => (state[k] || []).filter((x) => mine.has(x.id)).map((x) => ({ x, kind })));
-    const box = union(items.map(({ x, kind }) => visualBox(x, kind)));
+    // The pin is the corner of the totem's items; an empty totem, until now
+    // never measured and so never kept clear, is pinned by its marker.
+    const reach = this.reachOf(state, mine);
+    const box = union(items.map(({ x, kind }) => visualBox(x, kind))) || reach;
     let at = entry.at || (box ? { x: box.minX, y: box.minY } : { x: 0, y: 0 });
-    const shifted = (p) => (box ? { minX: p.x, minY: p.y, maxX: p.x + box.maxX - box.minX, maxY: p.y + box.maxY - box.minY } : null);
-    // A totem that grew pushes the ones after it, never the other way round.
-    for (let clash; box && (clash = drawn.find((d) => bboxDistance(d, shifted(at)) < FREE));) at = { x: clash.maxX + FREE, y: at.y };
+    const shifted = (p) => (reach ? { minX: reach.minX + p.x - box.minX, minY: reach.minY + p.y - box.minY, maxX: reach.maxX + p.x - box.minX, maxY: reach.maxY + p.y - box.minY } : null);
+    // A totem that grew pushes the ones after it, never the other way round,
+    // until its items and marker are TOTEM_GAP clear of every earlier one.
+    for (let clash; reach && (clash = drawn.find((d) => bboxDistance(d, shifted(at)) < TOTEM_GAP));) at = { x: clash.maxX + TOTEM_GAP + box.minX - reach.minX, y: at.y };
     if (box) {
       const dx = at.x - box.minX, dy = at.y - box.minY;
       for (const k of ['areas', 'drawings', 'files', 'totems']) for (const it of state[k] || []) if (mine.has(it.id)) move(it, dx, dy);
       for (const b of out.boxes) b.at = at;
       drawn.push(shifted(at));
     }
-    return { out, at, drops };
+    return { out, at, drops, mine };
   }
 
   /* The canvas's content rebuilt from its scripts, on the state the writer
@@ -287,7 +306,7 @@ export class AgentCanvases {
     const fresh = new Map(overrides.map((o) => [norm(o.name), o]));
     for (const o of overrides) if (!entries.some((e) => norm(e.name) === norm(o.name))) entries.push({ name: o.name, file: scriptFile(o.name), owner: o.owner, at: null });
     const out = { written: [], touched: new Set(), removed: old, boxes: [], texts: [], copies: [], wires: [], totemId: null, check: null };
-    const totems = [], drawn = [], placed = [];
+    const totems = [], drawn = [], placed = [], pushed = [];
     for (const e of entries) {
       const override = fresh.get(norm(e.name));
       const isNew = Boolean(override);
@@ -310,7 +329,9 @@ export class AgentCanvases {
         }
       }
       if (!done) { totems.push({ totem: e.name, drawn: 'none', errors }); continue; }
+      if (e.at && done.at.x !== e.at.x) pushed.push(e.name);
       e.at = done.at;
+      e.mine = done.mine;
       e.drawnFrom = done.which;
       e.text = done.text;
       e.drops = dropAddresses(parseScript(done.text));
@@ -321,7 +342,34 @@ export class AgentCanvases {
       placed.push(...done.drops);
       totems.push({ totem: e.name, drawn: done.which, errors });
     }
-    return { out, entries, totems, placed };
+    const spaced = [...new Set([...pushed, ...this.spaceOut(entries, state)])];
+    return { out, entries, totems, placed, spaced };
+  }
+
+  /* The drawn canvas grouped the way CanvasX groups it (magneticTotems): a
+   * totem whose items another totem's marker or items would take is moved
+   * right, the later of the two, TOTEM_GAP clear, until every totem holds
+   * only its own. Run at every render, so every change is checked
+   * (t-5c984630aa). The names of the totems moved. */
+  spaceOut(entries, state) {
+    const moved = new Set();
+    for (let round = 0; round < SPACING_ROUNDS; round++) {
+      const owner = new Map();
+      entries.forEach((e, i) => { for (const id of e.mine || []) owner.set(id, i); });
+      let pair = null;
+      for (const [item, totem] of magneticTotems(state)) {
+        const a = owner.get(item.id), b = owner.get(totem.id);
+        if (a !== undefined && b !== undefined && a !== b) { pair = [Math.min(a, b), Math.max(a, b)]; break; }
+      }
+      if (!pair) break;
+      const [first, later] = pair.map((i) => entries[i]);
+      const a = this.reachOf(state, first.mine), b = this.reachOf(state, later.mine);
+      const dx = Math.max(a.maxX + TOTEM_GAP - b.minX, TOTEM_GAP);
+      for (const k of ['areas', 'drawings', 'files', 'totems']) for (const it of state[k] || []) if (later.mine.has(it.id)) move(it, dx, 0);
+      later.at = { x: later.at.x + dx, y: later.at.y };
+      moved.add(later.name);
+    }
+    return [...moved];
   }
 
   /* Draws the canvas from its scripts, through the writer's safe write
@@ -366,9 +414,13 @@ export class AgentCanvases {
     const totemsSaid = built.totems.map(({ totem, drawn, errors }) => ({ totem, drawn, errors }));
     fs.writeFileSync(path.join(dir, 'last-render.json'), JSON.stringify({ at: new Date(this.now()).toISOString(), totems: totemsSaid, placed: [...new Set(built.placed)] }, null, 2));
     this.note(canvas, 'render', { totems: totemsSaid.map((t) => `${t.totem}: ${t.drawn}`), placed: [...new Set(built.placed)] });
+    if (built.spaced.length) {
+      this.note(canvas, 'spaced', { totems: built.spaced });
+      this.log(`${canvas}: moved ${built.spaced.join(', ')} clear of the totems beside ${built.spaced.length === 1 ? 'it' : 'them'}.`);
+    }
     // What is on the canvas now goes on to RAGX (t-7513cdd783).
     if (this.onRendered) this.onRendered(canvas);
-    return { ...result.report, totems: built.totems, placed: [...new Set(built.placed)] };
+    return { ...result.report, totems: built.totems, placed: [...new Set(built.placed)], spaced: built.spaced };
   }
 
   /* A script the writer queued for an agent canvas. true when finished. */

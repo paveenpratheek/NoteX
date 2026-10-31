@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-138%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-140%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -119,7 +119,7 @@ Later scripts can change the agent's own work:
 **Agent canvases** (assigned to the agent in CanvasX, or from NoteX's Agent canvases view)
 - **The Agent canvases view** in ter-manager lists every canvas with whose it is and whether CanvasX has it open. From there you can assign an empty, closed canvas to the agent or take one back. For each agent canvas it shows the totem scripts (owner, earlier versions, drops, what the last render drew each from, errors, and the script itself), its activity, and a Draw again button.
 - The canvas is drawn from one totem script per totem. An agent changes a totem by sending its whole script again, and the new version is kept only if the canvas still draws with it. Every earlier version is kept, along with the last one that drew.
-- Totems stay where they were first placed; one that grows wider pushes the totems after it. A script that stops drawing is drawn from its last good version, so one broken totem never takes the others with it.
+- Totems stay where they were first placed; one that grows wider pushes the totems after it. Every render keeps totems at least 1,200 apart, past CanvasX's grouping reach (500 round a totem's marker, 300 between items), and then groups the canvas the way CanvasX does: a totem that would take another's boxes is moved right until each holds only its own. An empty totem counts by its marker. Each move is in the canvas's activity. A script that stops drawing is drawn from its last good version, so one broken totem never takes the others with it.
 - Scripts name Inbox drops by id, so the content stays in one place. A drop placed this way is marked placed.
 - **The agent places drops by itself.** Once you pick a drop's canvas, NoteX shows Claude Code (headless, with no tools) the canvas's scripts, the drops, your description and your message, and takes back one totem script. Images are shown as the images themselves, so the agent looks at them; PDFs and Word files go by name and description. Files sent together are placed together, in that one script. The script must place every drop and keep everything its totem already held, word for word, or Claude is asked once more with the reason. A switch on the Inbox turns placing off, and a picker beside it chooses the model: Sonnet, Opus or Haiku.
 - **Chat with the agent** about an agent canvas: beside the canvas in CanvasX, or in the Agent canvases view. Ask about it ("how many bugs are here?") or tell it how to arrange it ("arrange it by topic, with bugs and ideas apart"), and pick Sonnet, Opus or Haiku. Claude Code, headless, sees the canvas's scripts, what every drop on it is (name, your description, a text's words), the images themselves, the last 10 turns and your message. It answers in a few sentences and, only when you ask for a change, sends whole scripts for the totems it changes. NoteX takes them only if everything the canvas held (every drop, note, text and file) is still on it somewhere, and draws them all at once, so they land together or not at all. Boxes and names may change; wires to a note that moved may be dropped. A totem cannot be deleted or renamed this way. NoteX keeps the whole conversation per canvas (`chat.jsonl`), and both places show it.
@@ -153,7 +153,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 138, all passing, in ~3,000 lines |
+| Tests | 140, all passing, in ~3,050 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 

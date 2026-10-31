@@ -739,7 +739,8 @@ async function openAgentCanvas(name) {
       : a.what === 'render' ? `Drawn - ${a.totems.join(', ') || 'no totems'}${a.placed && a.placed.length ? ` · placed ${a.placed.length}` : ''}`
         : a.what === 'asked' ? `Asked (${MODEL_LABEL[a.model] || a.model}): ${a.ask}`
           : a.what === 'answered' ? (a.status === 'done' ? `Arranged as asked - ${a.totems.join(', ')}` : a.status === 'answered' ? 'Answered in the chat' : a.detail || 'Could not arrange it')
-            : a.what === 'forgot' ? `Forgot drop ${a.drop}` : a.what === 'assigned' ? 'Assigned to the agent' : a.what === 'taken back' ? 'Taken back from the agent' : a.what;
+            : a.what === 'spaced' ? `Moved ${a.totems.join(', ')} clear of the totems beside ${a.totems.length === 1 ? 'it' : 'them'}`
+              : a.what === 'forgot' ? `Forgot drop ${a.drop}` : a.what === 'assigned' ? 'Assigned to the agent' : a.what === 'taken back' ? 'Taken back from the agent' : a.what;
     const li = el('li', a.status && !['written', 'done', 'answered'].includes(a.status) ? 'bad' : null);
     li.append(el('span', 'when', ago(a.at)), el('span', null, say));
     act.append(li);

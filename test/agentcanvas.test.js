@@ -171,3 +171,53 @@ test('a canvas not assigned to the agent is still written item by item', async (
   assert.equal(fs.existsSync(path.join(data, 'agent-canvases', 'Notes')), false);
   assert.ok(readFabric(path.join(ws, 'Notes')).state.totems.some((x) => x.name === 'Mine'));
 });
+
+/* Every totem's items, by the totem NoteX drew them for, and whether
+ * CanvasX's own grouping gives each item to that totem. */
+async function spacing(board, agent) {
+  const { magneticTotems } = await import('../engine/lib/rules.js');
+  const st = readFabric(board).state;
+  const by = new Map();
+  for (const k of ['areas', 'drawings', 'files']) for (const it of st[k] || []) if (it.linkedTotemId) (by.get(it.linkedTotemId) || by.set(it.linkedTotemId, new Set()).get(it.linkedTotemId)).add(it.id);
+  for (const t of st.totems) (by.get(t.id) || by.set(t.id, new Set()).get(t.id)).add(t.id);
+  const reach = Object.fromEntries(st.totems.map((t) => [t.name, agent.reachOf(st, by.get(t.id))]));
+  const wrong = [...magneticTotems(st)].filter(([item, totem]) => item.linkedTotemId && item.linkedTotemId !== totem.id).map(([item]) => item.name || item.id);
+  return { reach, wrong };
+}
+
+test('totems stay TOTEM_GAP apart and CanvasX\'s grouping gives each only its own, as one grows (t-5c984630aa)', async (t) => {
+  const { writer, board, agent } = setup(t);
+  const { TOTEM_GAP } = await import('../engine/lib/agentcanvas.js');
+  assert.equal(TOTEM_GAP, 1200);
+  await writer.submit({ script: totem('A', '<Area name="One"><Text>a</Text></Area>'), owner: 'claude' });
+  await writer.submit({ script: totem('B', '<Area name="Two"><Text>b</Text></Area>'), owner: 'claude' });
+  for (const n of [2, 4, 6]) {
+    const row = '<Row>' + Array.from({ length: n }, (_, i) => `<Area name="Box ${i}"><Text>wide</Text></Area>`).join('') + '</Row>';
+    assert.equal((await writer.submit({ script: totem('A', row), owner: 'claude' })).status, 'written');
+    const { reach, wrong } = await spacing(board, agent);
+    assert.ok(reach.B.minX - reach.A.maxX >= TOTEM_GAP - 1, `A has ${n} boxes: B starts ${Math.round(reach.B.minX - reach.A.maxX)} right of A`);
+    assert.deepEqual(wrong, []);
+  }
+  assert.ok(agent.activity('Board').some((a) => a.what === 'spaced' && a.totems.includes('B')), 'the move is in the activity');
+});
+
+test('an empty totem - just its marker - is kept clear too, and a canvas spaced at 800 is re-spaced at its next render', async (t) => {
+  const { writer, board, agent, data } = setup(t);
+  const { TOTEM_GAP } = await import('../engine/lib/agentcanvas.js');
+  await writer.submit({ script: totem('Forza 6', '<Row><Area name="McLaren"><Text>m</Text></Area><Area name="Nissan"><Text>n</Text></Area></Row>'), owner: 'claude' });
+  await writer.submit({ script: totem('Screenshots', ''), owner: 'claude' });
+  // As TEST NOTEX was: the empty totem pinned only 800 right of Forza 6.
+  const file = path.join(data, 'agent-canvases', 'Board', 'layout.json');
+  const layout = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const forza = (await spacing(board, agent)).reach['Forza 6'];
+  layout.totems.find((x) => x.name === 'Screenshots').at = { x: Math.round(forza.maxX + 800), y: 0 };
+  fs.writeFileSync(file, JSON.stringify(layout));
+  agent.render('Board');
+  let s = await spacing(board, agent);
+  assert.ok(s.reach.Screenshots.minX - s.reach['Forza 6'].maxX >= TOTEM_GAP - 1, 're-spaced at the next render');
+  // Forza 6 gains a third image box: the empty Screenshots moves on, and takes none of it.
+  await writer.submit({ script: totem('Forza 6', '<Row><Area name="McLaren"><Text>m</Text></Area><Area name="Nissan"><Text>n</Text></Area><Area name="Ferrari"><Text>f</Text></Area></Row>'), owner: 'claude' });
+  s = await spacing(board, agent);
+  assert.ok(s.reach.Screenshots.minX - s.reach['Forza 6'].maxX >= TOTEM_GAP - 1);
+  assert.deepEqual(s.wrong, []);
+});
