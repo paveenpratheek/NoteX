@@ -261,16 +261,20 @@ export class AgentCanvases {
   }
 
   /* The canvas's content rebuilt from its scripts, on the state the writer
-   * hands over; override is a new script for one totem, tried alone. */
-  build(canvas, fabricDir, state, override = null) {
+   * hands over; overrides are new scripts for totems, tried as sent - one
+   * from notex_write or the placer, or all of an ask's at once
+   * (t-b5d4a34951). */
+  build(canvas, fabricDir, state, overrides = []) {
     const old = CONTENT.flatMap((k) => (state[k] || []).map((x) => x.id));
     for (const k of CONTENT) state[k] = [];
     const entries = this.layout(canvas).totems.map((t) => ({ ...t }));
-    if (override && !entries.some((e) => norm(e.name) === norm(override.name))) entries.push({ name: override.name, file: scriptFile(override.name), owner: override.owner, at: null });
+    const fresh = new Map(overrides.map((o) => [norm(o.name), o]));
+    for (const o of overrides) if (!entries.some((e) => norm(e.name) === norm(o.name))) entries.push({ name: o.name, file: scriptFile(o.name), owner: o.owner, at: null });
     const out = { written: [], touched: new Set(), removed: old, boxes: [], texts: [], copies: [], wires: [], totemId: null, check: null };
     const totems = [], drawn = [], placed = [];
     for (const e of entries) {
-      const isNew = override && norm(e.name) === norm(override.name);
+      const override = fresh.get(norm(e.name));
+      const isNew = Boolean(override);
       if (isNew) e.owner = override.owner;
       const tries = isNew ? [['new', override.script]] : [['current', this.read(canvas, e.file)], ['good', this.read(canvas, e.file, 'good')]];
       const errors = [];
@@ -305,17 +309,18 @@ export class AgentCanvases {
   }
 
   /* Draws the canvas from its scripts, through the writer's safe write
-   * (backup, temp file, read-back); with override, a new script for one
-   * totem, kept only if the whole canvas draws with it. null when the
-   * canvas changed under the write - try again. */
-  render(canvas, { override = null } = {}) {
+   * (backup, temp file, read-back); with override (one totem) or overrides
+   * (several), new scripts kept only if the whole canvas draws with all of
+   * them. null when the canvas changed under the write - try again. */
+  render(canvas, { override = null, overrides = null } = {}) {
     const fabricDir = this.writer.canvasDir(canvas);
     if (!isAgentCanvas(fabricDir)) throw new Refusal(`${canvas} is not assigned to the agent - the user assigns it in CanvasX.`);
+    const tried = overrides || (override ? [override] : []);
     let built = null;
     const result = this.writer.write(fabricDir, canvas, (state) => {
-      built = this.build(canvas, fabricDir, state, override);
+      built = this.build(canvas, fabricDir, state, tried);
       return built.out;
-    }, override ? override.owner : null);
+    }, tried.length ? tried[0].owner : null);
     if (result === null) return null;
 
     const dir = this.dir(canvas);

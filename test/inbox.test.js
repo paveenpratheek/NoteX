@@ -209,3 +209,19 @@ test('a send from the composer: files with the user\'s description and message, 
   const later = await call('PUT', `/api/inbox/${words.body.drops[0].id}/canvas`, { body: { byMessage: true } });
   assert.equal(later.body.error.code, 'no-ask');
 });
+
+test('the placer\'s model is switched from the page, and an ask is refused before it reaches Claude (t-fe1817678b, t-a9198c414f)', async () => {
+  assert.equal((await call('PUT', '/api/placer', { body: { model: 'gpt' } })).body.error.code, 'bad-model');
+  const r = await call('PUT', '/api/placer', { body: { model: 'opus' } });
+  assert.equal(r.body.placer.model, 'opus');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).placer.model, 'opus');
+  assert.deepEqual((await call('GET', '/api/inbox')).body.models, ['sonnet', 'opus', 'haiku']);
+  const one = (await call('GET', '/api/agent-canvases/Harness')).body;
+  assert.deepEqual([one.ask, one.model, one.models], [null, 'sonnet', ['sonnet', 'opus', 'haiku']]);
+  // Every one of these is refused before any model is asked.
+  assert.equal((await call('POST', '/api/agent-canvases/Harness/ask', { body: { ask: 'tidy', model: 'gpt' } })).body.error.code, 'bad-model');
+  assert.equal((await call('POST', '/api/agent-canvases/Harness/ask', { body: {} })).status, 400);
+  assert.match((await call('POST', '/api/agent-canvases/Harness/ask', { body: { ask: '   ' } })).body.error.message, /Write what the agent should do/);
+  assert.match((await call('POST', '/api/agent-canvases/Notes/ask', { body: { ask: 'tidy', model: 'haiku' } })).body.error.message, /not assigned to the agent/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).arranger, undefined, 'a refused ask keeps no model');
+});

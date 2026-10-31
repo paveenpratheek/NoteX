@@ -88,6 +88,8 @@ export class Engine {
   leaveToMessage(id) { return this.json('PUT', `/api/inbox/${encodeURIComponent(id)}/canvas`, { byMessage: true }); }
   forgetDrop(id) { return this.json('POST', `/api/inbox/${encodeURIComponent(id)}/forget`); }
   setPlacing(on) { return this.json('PUT', '/api/placer', { on }); }
+  setPlacerModel(model) { return this.json('PUT', '/api/placer', { model }); }
+  askAgent(name, ask, model) { return this.json('POST', `/api/agent-canvases/${encodeURIComponent(name)}/ask`, { ask, model }); }
   agentCanvases() { return this.json('GET', '/api/agent-canvases'); }
   agentCanvas(name) { return this.json('GET', `/api/agent-canvases/${encodeURIComponent(name)}`); }
   setAgent(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/agent`, { on }); }

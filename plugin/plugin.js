@@ -503,7 +503,16 @@ async function loadInbox() {
 
 /* The agent places queued drops with Claude, one at a time (t-c24e0494a2);
  * the switch stops it, and the line says what it is doing or why it waits. */
+/* Sonnet, Opus or Haiku, for placing and for asks (t-fe1817678b). */
+const MODEL_LABEL = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
+function modelSelect(sel, models, current) {
+  const keep = sel.value;
+  sel.replaceChildren(...(models || []).map((m) => new Option(MODEL_LABEL[m] || m, m)));
+  sel.value = current || keep;
+}
+
 function renderPlacer(p, drops) {
+  modelSelect($('placer-model'), S.inbox && S.inbox.models, p.model);
   const btn = $('placing-btn');
   btn.setAttribute('aria-checked', String(p.on));
   btn.title = p.on ? `The agent places each queued drop on its canvas, with Claude (${p.model}). Press to stop.` : 'Queued drops wait. Press to let the agent place them.';
@@ -515,6 +524,11 @@ function renderPlacer(p, drops) {
   line.hidden = !text;
   line.textContent = text;
   line.classList.toggle('bad', Boolean(p.on && p.held));
+}
+
+async function setPlacerModel() {
+  const model = $('placer-model').value;
+  try { await engine.setPlacerModel(model); toast(`The agent places drops with ${MODEL_LABEL[model] || model}.`); await loadInbox(); } catch (e) { toast(e.message, true); }
 }
 
 async function togglePlacing() {
@@ -691,6 +705,7 @@ async function openAgentCanvas(name) {
   $('agent-help').textContent = c.agent
     ? 'NoteX draws this canvas from the scripts below; CanvasX shows it view-only. Drops you send it from the Inbox are placed into these scripts.'
     : `Only an empty canvas can be assigned, and not while CanvasX has it open${c.open ? ' - it is open now' : ''}. Make a new canvas in CanvasX for the agent.`;
+  renderAsk(name, c);
   $('agent-body').hidden = !c.agent && !c.activity.length;
   const ul = $('totem-list');
   ul.replaceChildren();
@@ -720,11 +735,49 @@ async function openAgentCanvas(name) {
   for (const a of c.activity) {
     const say = a.what === 'script' ? `${a.change} from ${a.owner}: ${a.status === 'written' ? 'kept' : a.status}${a.message ? ` - ${a.message}` : ''}`
       : a.what === 'render' ? `Drawn - ${a.totems.join(', ') || 'no totems'}${a.placed && a.placed.length ? ` · placed ${a.placed.length}` : ''}`
-        : a.what === 'forgot' ? `Forgot drop ${a.drop}` : a.what === 'assigned' ? 'Assigned to the agent' : a.what === 'taken back' ? 'Taken back from the agent' : a.what;
-    const li = el('li', a.status && a.status !== 'written' ? 'bad' : null);
+        : a.what === 'asked' ? `Asked (${MODEL_LABEL[a.model] || a.model}): ${a.ask}`
+          : a.what === 'answered' ? (a.status === 'done' ? `Arranged as asked - ${a.totems.join(', ')}` : a.detail || 'Could not arrange it')
+            : a.what === 'forgot' ? `Forgot drop ${a.drop}` : a.what === 'assigned' ? 'Assigned to the agent' : a.what === 'taken back' ? 'Taken back from the agent' : a.what;
+    const li = el('li', a.status && !['written', 'done'].includes(a.status) ? 'bad' : null);
     li.append(el('span', 'when', ago(a.at)), el('span', null, say));
     act.append(li);
   }
+}
+
+/* The user asks the agent about this canvas in their own words; the agent
+ * rewrites its totem scripts, keeping everything on it (t-a9198c414f,
+ * t-b5d4a34951). The line follows the ask until it is answered. */
+function renderAsk(name, c) {
+  $('ask-box').hidden = !c.agent;
+  if (!c.agent) return;
+  const sel = $('ask-model');
+  if (sel.dataset.canvas !== name || !sel.options.length) modelSelect(sel, c.models, c.model);
+  sel.dataset.canvas = name;
+  const a = c.ask;
+  const working = Boolean(a && a.status === 'working');
+  $('ask-btn').disabled = working;
+  const line = $('ask-line');
+  line.hidden = !a;
+  line.classList.toggle('bad', Boolean(a && a.status === 'failed'));
+  if (a) {
+    line.textContent = working ? `The agent (${MODEL_LABEL[a.model] || a.model}) is working on "${a.ask}"…`
+      : a.status === 'done' ? `Done ${ago(a.doneAt)}: rewrote ${a.totems.join(', ')}.` : a.detail || 'The agent could not do it.';
+  }
+  clearTimeout(renderAsk.timer);
+  if (working) renderAsk.timer = setTimeout(() => { if (S.tab === 'agents' && S.agentCanvas === name) openAgentCanvas(name); }, 3000);
+}
+
+async function askAgent() {
+  const name = S.agentCanvas;
+  const ask = $('ask-text').value.trim();
+  if (!ask) { toast('Write what the agent should do with the canvas.', true); return; }
+  const model = $('ask-model').value;
+  try {
+    await engine.askAgent(name, ask, model);
+    $('ask-text').value = '';
+    toast(`Asked the agent (${MODEL_LABEL[model] || model}) about ${name}.`);
+  } catch (e) { toast(e.message, true); return; }
+  await openAgentCanvas(name);
 }
 
 async function toggleAssign() {
@@ -789,6 +842,9 @@ $('render-btn').addEventListener('click', drawAgain);
 $('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; attach(files); });
 $('drop-send').addEventListener('click', sendDrop);
 $('placing-btn').addEventListener('click', togglePlacing);
+$('placer-model').addEventListener('change', setPlacerModel);
+$('ask-btn').addEventListener('click', askAgent);
+$('ask-text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askAgent(); });
 for (const id of ['drop-text', 'drop-ask']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendDrop(); });
 $('drop-ask').addEventListener('input', askChanged);
 $('drop-canvas').addEventListener('change', () => { S.canvasPicked = true; });

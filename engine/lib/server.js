@@ -40,6 +40,7 @@ import { Bronze, BronzeError } from './bronze.js';
 import { AgentCanvases, isAgentCanvas } from './agentcanvas.js';
 import { Refusal } from './layout.js';
 import { Placer } from './placer.js';
+import { Arranger, MODELS } from './arranger.js';
 import { DropSync } from './dropsync.js';
 import { forgetDrop } from './forget.js';
 
@@ -171,6 +172,8 @@ export async function startServer({
   agent.onRendered = (canvas) => { dropSync.queue(canvas).catch((e) => log(`Sending ${canvas}'s drops failed: ${e.message}`)); };
   // Queued drops are placed by the agent, one at a time (t-c24e0494a2).
   const placer = new Placer({ config, dataDir: dir, bronze, writer, log, ...(syncOptions.placerRun ? { run: syncOptions.placerRun } : {}), ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
+  // The user asks the agent about one of its canvases (t-a9198c414f).
+  const arranger = new Arranger({ config, dataDir: dir, writer, log, ...(syncOptions.arrangerRun ? { run: syncOptions.arrangerRun } : {}) });
 
   /* The canvases assigned to the agent: those whose folder holds the
    * agent.json CanvasX writes. Only they take drops (t-52f040cf72). */
@@ -215,18 +218,22 @@ export async function startServer({
       const inbox = { drops: drops.length, waiting: drops.filter((d) => d.status === 'waiting').length };
       return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), inbox, placer: placer.report(), ...workspaceState() });
     }
-    /* Whether the agent places queued drops by itself; off, they wait in the queue. */
+    /* Whether the agent places queued drops by itself - off, they wait in
+     * the queue - and with which Claude model (t-fe1817678b). */
     if (m('PUT', /^\/api\/placer$/)) {
-      const { on } = await readJson(req);
-      if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
-      config.placing = on;
+      const { on, model } = await readJson(req);
+      if (on === undefined && model === undefined) throw new HttpError(400, 'bad-body', 'Send {"on": true|false} and/or {"model": "sonnet"|"opus"|"haiku"}.');
+      if (on !== undefined && typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
+      if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
+      if (on !== undefined) config.placing = on;
+      if (model !== undefined) config.placer = { ...(config.placer || {}), model };
       saveConfig();
       if (on) placer.tick();
       return json(200, { placer: placer.report() });
     }
     /* The Inbox: drops kept in bronze until the user picks an agent canvas
      * for them (t-85f3ec23ef, t-0f32cb63f2). */
-    if (m('GET', /^\/api\/inbox$/)) return json(200, { drops: bronze.list().map(shown), canvases: agentCanvases(), placer: placer.report() });
+    if (m('GET', /^\/api\/inbox$/)) return json(200, { drops: bronze.list().map(shown), canvases: agentCanvases(), placer: placer.report(), models: MODELS });
     if (m('POST', /^\/api\/inbox\/text$/)) {
       const body = await readJson(req, MAX_TEXT_JSON);
       if (typeof body.text !== 'string') throw new HttpError(400, 'bad-body', 'Send {"text": "...", "note": "...", "canvas": "..."}.');
@@ -370,7 +377,20 @@ export async function startServer({
       const fdir = fabricDir(needWorkspace(), name);
       if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
       const mine = isAgentCanvas(fdir);
-      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name) });
+      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name), ask: arranger.report(name), model: arranger.model(), models: MODELS });
+    }
+    /* Ask the agent to arrange one of its canvases, in the user's words
+     * (t-a9198c414f); the answer comes in the canvas's ask and activity. */
+    if ((p = m('POST', /^\/api\/agent-canvases\/([^/]+)\/ask$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
+      const { ask, model } = await readJson(req);
+      if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"}.');
+      if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
+      const job = arranger.ask(name, ask, model);
+      if (model !== undefined) { config.arranger = { ...(config.arranger || {}), model }; saveConfig(); }
+      return json(202, { ask: job });
     }
     /* Assign a canvas to the agent, or take it back (t-d798b625e5). */
     if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/agent$/))) {
@@ -491,6 +511,7 @@ export async function startServer({
       await sync.stop();
       rules.stop();
       await placer.stop();
+      await arranger.stop();
       await dropSync.stop();
       await writer.stop();
       await new Promise((r) => server.close(r));

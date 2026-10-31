@@ -114,7 +114,7 @@
       <p class="note" id="drop-help"></p>
     </div>
     <div class="sheet drops-sheet" aria-label="In the inbox">
-      <div class="sheet-head"><span class="eyebrow">In the inbox</span><span class="note" id="drops-count"></span><button id="placing-btn" class="switch" role="switch" aria-checked="true" title="The agent places each queued drop on its canvas, with Claude">Agent places drops</button></div>
+      <div class="sheet-head"><span class="eyebrow">In the inbox</span><span class="note" id="drops-count"></span><select id="placer-model" class="model-select" aria-label="Claude model the agent places drops with" title="The Claude model the agent places drops with"></select><button id="placing-btn" class="switch" role="switch" aria-checked="true" title="The agent places each queued drop on its canvas, with Claude">Agent places drops</button></div>
       <div class="note line-card" id="placer-line" hidden></div>
       <ul id="drop-list" class="drops"></ul>
     </div>
@@ -132,6 +132,15 @@
         <button id="render-btn" title="Draw this canvas again from its totem scripts" hidden>Draw again</button>
       </div>
       <p class="note" id="agent-help"></p>
+      <div id="ask-box" class="ask-box card" hidden>
+        <label class="eyebrow" for="ask-text">Ask the agent</label>
+        <textarea id="ask-text" placeholder="What to do with this canvas, e.g. &quot;arrange it by topic, with bugs and ideas apart&quot;"></textarea>
+        <div class="row">
+          <select id="ask-model" aria-label="Claude model for this ask" title="The Claude model the agent asks"></select>
+          <button id="ask-btn" class="primary">Ask</button>
+        </div>
+        <p class="note" id="ask-line" hidden></p>
+      </div>
       <div id="agent-body" hidden>
         <span class="eyebrow">Totem scripts</span>
         <ul id="totem-list" class="totems"></ul>
