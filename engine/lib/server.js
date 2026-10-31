@@ -423,8 +423,7 @@ export async function startServer({
       fabricDir(needWorkspace(), name);
       const { on } = await readJson(req);
       if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
-      // An agent canvas reaches RAGX as its drops, so it is not also kept in sync (t-083eed1f9f).
-      if (on && config.sync && config.sync[name]) sync.set(name, false);
+      // Assigned, it is kept in RAGX by itself from the next look (t-65a490ef80).
       return json(200, { name, agent: on, changed: agent.assign(name, on) });
     }
     /* An agent canvas drawn again from its scripts, e.g. after a script file was mended by hand. */
@@ -452,7 +451,11 @@ export async function startServer({
       const { on } = await readJson(req);
       if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
       if (on && !fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No fabric ${name} in the workspace.`);
-      if (on && isAgentCanvas(fdir)) throw new HttpError(409, 'agent-canvas', `${name} is an agent canvas: what is dropped on it reaches RAGX by itself, each drop as its own document.`);
+      // An agent canvas is always kept: switching it on changes nothing, off is refused (t-65a490ef80).
+      if (isAgentCanvas(fdir)) {
+        if (!on) throw new HttpError(409, 'agent-canvas', `${name} is assigned to the agent, so it is always kept in RAGX - take it back from the agent to stop that.`);
+        return json(200, { name, on, sync: sync.report()[name] || null });
+      }
       sync.set(name, on);
       return json(200, { name, on, sync: sync.report()[name] || null });
     }

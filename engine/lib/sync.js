@@ -1,5 +1,6 @@
 /* Auto-sync: the canvases the user switched on are kept in RAGX by
- * themselves; every other canvas is left alone (t-0c1da1346d).
+ * themselves, and every canvas assigned to the agent always is; every
+ * other canvas is left alone (t-0c1da1346d, t-65a490ef80).
  *
  * Every 5 s the modified time of each watched fabric.json is looked at
  * (t-233e5561d1). A canvas is synced once it has been quiet for 15 s since
@@ -54,14 +55,41 @@ export class AutoSync {
     return this.mem.get(name);
   }
 
-  // An agent canvas reaches RAGX as its drops, never as a canvas document (t-083eed1f9f).
-  watched() { return Object.keys(this.config.sync || {}).filter((name) => !isAgentCanvas(path.dirname(this.file(name)))); }
+  /* The canvases assigned to the agent: those whose folder holds an agent.json. */
+  agentCanvases() {
+    const ws = this.config.workspace;
+    if (!ws) return [];
+    let names = [];
+    try { names = fs.readdirSync(ws, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch (_) { return []; }
+    return names.filter((n) => fs.existsSync(path.join(ws, n, 'fabric.json')) && isAgentCanvas(path.join(ws, n)));
+  }
+
+  /* The canvases kept: the ones the user switched on, and every agent
+   * canvas, always - with an entry marked auto, which RAGX reads as the
+   * agent's, and which goes once the canvas is taken back from the agent,
+   * so it stops being kept unless the user switches it on (t-65a490ef80). */
+  watched() {
+    const agents = new Set(this.agentCanvases());
+    let changed = false;
+    for (const name of agents) {
+      if (this.config.sync && this.config.sync[name]) continue;
+      this.config.sync ||= {};
+      this.config.sync[name] = { synced: null, at: null, auto: true };
+      changed = true;
+    }
+    for (const [name, s] of Object.entries(this.config.sync || {})) {
+      if (s && s.auto && !agents.has(name)) { delete this.config.sync[name]; this.mem.delete(name); changed = true; }
+    }
+    if (changed) this.saveConfig();
+    return Object.keys(this.config.sync || {});
+  }
 
   /* Switching on syncs the canvas as it is now, without waiting for its next edit. */
   set(name, on) {
     if (on) {
       this.config.sync ||= {};
       if (!this.config.sync[name]) this.config.sync[name] = { synced: null, at: null };
+      delete this.config.sync[name].auto; // switched on by the user, it stays kept after the agent lets it go
       Object.assign(this.state(name), { status: 'settling', detail: null, seen: this.mtime(name), quietFrom: -Infinity, retry: true, holdUntil: 0 });
     } else {
       if (this.config.sync) delete this.config.sync[name];
@@ -130,7 +158,7 @@ export class AutoSync {
       const sent = await addToRagx(rt, `${name}.notex.md`);
       // Switched off while this ran: it was sent, but nothing more is kept of it.
       if (!this.watched().includes(name)) return { name, status: 'off', queued: sent.queued || [] };
-      this.config.sync[name] = { synced: m, at: new Date(this.now()).toISOString() };
+      this.config.sync[name] = { ...this.config.sync[name], synced: m, at: new Date(this.now()).toISOString() };
       this.saveConfig();
       // A save made while this ran has another modified time: the next look syncs it.
       Object.assign(st, { status: 'synced', detail: sent.queued && sent.queued.length ? null : 'RAGX already had this version.' });

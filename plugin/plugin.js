@@ -338,10 +338,15 @@ function ago(iso) {
 
 /* The open canvas's switch and line: whether it is kept in RAGX, and where its sync is. */
 function renderSync(sync) {
-  const on = Boolean(sync);
+  // An agent canvas is always kept in RAGX; its switch stays on (t-65a490ef80).
+  const agentOwned = Boolean((S.fabrics.find((f) => f.name === S.fabric) || {}).agent);
+  const on = Boolean(sync) || agentOwned;
   const btn = $('sync-btn');
   btn.setAttribute('aria-checked', String(on));
-  btn.title = on ? 'Kept in RAGX: synced 15 s after each save. Press to stop.' : 'Keep this canvas in RAGX: synced now and after each save';
+  btn.disabled = agentOwned;
+  btn.title = agentOwned ? 'Assigned to the agent, so always kept in RAGX: synced 15 s after each change. Take it back from the agent to stop.'
+    : on ? 'Kept in RAGX: synced 15 s after each save. Press to stop.' : 'Keep this canvas in RAGX: synced now and after each save';
+  if (!sync) { $('sync-line').hidden = true; return; }
   const line = $('sync-line');
   line.hidden = !on;
   if (!on) return;

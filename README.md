@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-143%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -126,7 +126,7 @@ Later scripts can change the agent's own work:
 - **Chat with the agent** about an agent canvas: beside the canvas in CanvasX, or in the Agent canvases view. Ask about it ("how many bugs are here?") or tell it how to arrange it ("arrange it by topic, with bugs and ideas apart"), and pick Sonnet, Opus or Haiku. Claude Code, headless, sees the canvas's scripts, what every drop on it is (name, your description, a text's words), the images themselves, the last 10 turns and your message. It answers in a few sentences and, only when you ask for a change, sends whole scripts for the totems it changes. NoteX takes them only if everything the canvas held (every drop, note, text and file) is still on it somewhere, and draws them all at once, so they land together or not at all. Boxes and names may change; wires to a note that moved may be dropped. A totem cannot be deleted or renamed this way. NoteX keeps the whole conversation per canvas (`chat.jsonl`), and both places show it.
 - **How CanvasX reaches NoteX**: at each start NoteX writes `.notex/link.json` into the workspace, with its address and a link token that opens only an agent canvas's chat, and removes it when it stops. CanvasX reads it through the workspace folder it already has open; its page (port 9075) is let through for those routes only.
 - Your description stays in the Inbox; RAGX gets the files, not the description, for now.
-- **On to RAGX**: after every render NoteX lists the drops on the canvas, each with its place and drop time, and RAGX takes each as a document of its own, searchable by when it was dropped. The list waits while RAGX is stopped. An agent canvas is never also synced as a canvas document, so nothing is found twice.
+- **On to RAGX**: after every render NoteX lists the drops on the canvas, each with its place and drop time, and RAGX takes each as a document of its own, searchable by when it was dropped. The list waits while RAGX is stopped. The agent canvas itself is always kept in RAGX too, as a canvas document synced 15 s after each change, with no switch to forget, so its totems, boxes and the agent's own notes are searchable. Take the canvas back from the agent to stop that. A text drop placed as a note is therefore found twice, as part of the canvas and as its own document; a dropped file is not (RAGX gives the document it has another place). In RAGX's search range these canvases are listed under **Notes assigned to agent**, each with its drops beneath it.
 
 **Rules canvas**
 - Mark one canvas as your rules. NoteX writes your own typed words from it to `rules.md`, and one import line in `~/.claude/CLAUDE.md` gives every Claude Code session those rules. Only the user's words go in; agents are refused on this canvas.
@@ -154,7 +154,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 143, all passing, in ~3,100 lines |
+| Tests | 144, all passing, in ~3,100 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 

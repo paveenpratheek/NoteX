@@ -122,11 +122,26 @@ test('while RAGX is not answering the list waits, survives a restart, and goes w
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(s.data, 'docs', 'drops-pending.json'), 'utf8')), []);
 });
 
-test('auto-sync never takes an agent canvas, even when switched on before it was assigned', (t) => {
+test('auto-sync always keeps an agent canvas, marked auto, and lets it go once the agent does (t-65a490ef80)', (t) => {
   const s = setup(t, null);
-  fs.mkdirSync(path.join(s.ws, 'Notes'), { recursive: true });
-  fs.writeFileSync(path.join(s.ws, 'Notes', 'fabric.json'), '{}');
-  s.config.sync = { Board: { synced: null, at: null }, Notes: { synced: null, at: null } };
-  const auto = new AutoSync({ config: s.config, saveConfig: () => {}, dataDir: s.data, build: () => ({}) });
+  for (const name of ['Notes', 'Diary']) {
+    fs.mkdirSync(path.join(s.ws, name), { recursive: true });
+    fs.writeFileSync(path.join(s.ws, name, 'fabric.json'), '{}');
+  }
+  // Notes is switched on by the user; Board is assigned to the agent and never was; Diary is neither.
+  s.config.sync = { Notes: { synced: null, at: null } };
+  let saved = 0;
+  const auto = new AutoSync({ config: s.config, saveConfig: () => { saved++; }, dataDir: s.data, build: () => ({}) });
+  assert.deepEqual(auto.watched().sort(), ['Board', 'Notes']);
+  assert.deepEqual(s.config.sync.Board, { synced: null, at: null, auto: true });
+  assert.equal(saved, 1);
+  assert.ok(auto.report().Board, 'shown as kept');
+  // Taken back from the agent: no longer kept, as the user never switched it on...
+  fs.rmSync(path.join(s.ws, 'Board', 'agent.json'));
   assert.deepEqual(auto.watched(), ['Notes']);
+  assert.equal(s.config.sync.Board, undefined, 'its auto entry goes, so RAGX no longer reads it as the agent\'s');
+  // ...until the user does, which makes it theirs to keep.
+  auto.set('Board', true);
+  assert.equal(s.config.sync.Board.auto, undefined);
+  assert.deepEqual(auto.watched().sort(), ['Board', 'Notes']);
 });

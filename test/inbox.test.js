@@ -268,3 +268,11 @@ test('the link goes when the engine stops, and only the engine\'s own', async ()
   assert.ok(!fs.existsSync(path.dirname(file)), 'the empty .notex folder goes too');
   fs.rmSync(tmp2, { recursive: true, force: true });
 });
+
+test('an agent canvas is always kept in RAGX: switching it on changes nothing, off is refused (t-65a490ef80)', async () => {
+  const off = await call('PUT', '/api/fabrics/Harness/sync', { body: { on: false } });
+  assert.equal(off.status, 409);
+  assert.match(off.body.error.message, /always kept in RAGX/);
+  assert.equal((await call('PUT', '/api/fabrics/Harness/sync', { body: { on: true } })).status, 200);
+  assert.ok((await call('GET', '/api/state')).body.sync.Harness, 'reported as kept');
+});
