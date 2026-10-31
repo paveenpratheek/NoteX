@@ -165,3 +165,39 @@ test('a chat turn answers in words, changes the canvas only when asked, and ever
   assert.equal(chat[3].text, 'Done - the two bugs now sit straight in the totem.');
   assert.deepEqual(chat[3].totems, ['Bugs']);
 });
+
+test('a chat turn with attachments places every one of them, the images shown to the agent (t-79ac13d22a, t-291d7e41be)', async (t) => {
+  const s = await setup(t);
+  const bronze = s.writer.agent.bronze;
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('gtr')]);
+  const img = bronze.land({ bytes: PNG, name: 'gtr.png', ask: 'put this under Ideas', send: 's-0000000009', canvas: 'Board' });
+  const txt = bronze.land({ text: 'grip tune for Spa', send: 's-0000000009', canvas: 'Board' });
+  for (const d of [img, txt]) bronze.mark(d.id, 'placing');
+  const ideas = `<Canvas name="Board"><Totem name="Ideas"><Note name="Search">time windows for search</Note><File drop="${img.id}"/><Note name="Tune" drop="${txt.id}"/></Totem></Canvas>`;
+  s.answers.push('Done, both are under Ideas.', `Done, both are under Ideas.\n\`\`\`xml\n${ideas}\n\`\`\``);
+  s.arranger.ask('Board', 'put this under Ideas', null, { source: 'canvasx', drops: [img.id, txt.id] });
+  await s.arranger.running.done;
+  const r = s.arranger.report('Board');
+  assert.equal(r.status, 'done', r.detail);
+  // A first answer of words only was asked for again: the attachments must be placed.
+  assert.match(s.asked[1].prompt, new RegExp(`do not place ${img.id}, ${txt.id}, which the user attached`));
+  assert.ok(s.asked[0].prompt.includes('The user attached these with the message') && s.asked[0].prompt.includes('grip tune for Spa'));
+  assert.deepEqual(s.asked[0].images.map((im) => im.id), [img.id]);
+  assert.deepEqual([img.id, txt.id].map((id) => bronze.get(id).status), ['placed', 'placed']);
+  const turn = s.writer.agent.chat('Board').find((c) => c.who === 'user');
+  assert.deepEqual(turn.attachments, [{ id: img.id, name: 'gtr.png', kind: 'image' }, { id: txt.id, name: 'typed text', kind: 'text' }]);
+});
+
+test('attachments a chat turn could not place are marked failed, to be sent again from the Inbox', async (t) => {
+  const s = await setup(t);
+  const bronze = s.writer.agent.bronze;
+  const d = bronze.land({ text: 'a stray idea', canvas: 'Board' });
+  bronze.mark(d.id, 'placing');
+  s.answers.push('Sorry.', 'Still sorry.');
+  s.arranger.ask('Board', '', null, { drops: [d.id] });
+  await s.arranger.running.done;
+  assert.equal(s.arranger.report('Board').ask, 'Place what I attached where it fits.');
+  assert.equal(s.arranger.report('Board').status, 'failed');
+  assert.equal(bronze.get(d.id).status, 'failed');
+  assert.match(bronze.get(d.id).detail, /could not place it from the chat/);
+});

@@ -276,12 +276,7 @@ export async function startServer({
      * checked before any lands, so the placer never sees half a send
      * (t-e0f8a22b3a, t-fe28f948b4). With no file, the description is the drop. */
     if (m('POST', /^\/api\/inbox\/send$/)) {
-      const type = String(req.headers['content-type'] || '');
-      if (!type.startsWith('multipart/form-data')) throw new HttpError(400, 'bad-body', 'Send the drop as multipart/form-data.');
-      const raw = await readBytes(req, MAX_SEND);
-      let form;
-      try { form = await new Response(raw, { headers: { 'content-type': type } }).formData(); } catch (_) { throw new HttpError(400, 'bad-body', 'The send is not readable multipart/form-data.'); }
-      const field = (k) => { const v = form.get(k); return typeof v === 'string' ? v.trim() : ''; };
+      const { field, parts, files } = await readSend(req);
       const description = field('description');
       const ask = field('message');
       const byMessage = field('byMessage') === 'true';
@@ -289,15 +284,7 @@ export async function startServer({
       if (Buffer.byteLength(description) > MAX_TEXT) throw new HttpError(413, 'too-large', 'A description can be at most 1 MB - drop it as a file.');
       if (ask.length > MAX_ASK) throw new HttpError(413, 'too-large', `A message to the agent can be at most ${MAX_ASK} characters.`);
       const canvas = byMessage ? null : agentCanvas(field('canvas'));
-      const files = form.getAll('file').filter((f) => typeof f !== 'string');
       if (!files.length && !description) throw new HttpError(400, 'empty', 'Nothing to keep: attach a file or write a description.');
-      const parts = [];
-      for (const f of files) {
-        if (f.size > MAX_DROP) throw new HttpError(413, 'too-large', `${f.name} is over ${Math.round(MAX_DROP / 1024 / 1024)} MB.`);
-        const bytes = Buffer.from(await f.arrayBuffer());
-        bronze.prepare({ bytes, name: f.name });
-        parts.push({ bytes, name: f.name });
-      }
       if (!parts.length) parts.push({ text: description });
       const send = 's-' + crypto.randomBytes(5).toString('hex');
       const note = files.length ? description || null : null;
@@ -485,6 +472,26 @@ export async function startServer({
     throw new HttpError(404, 'no-route', `No ${req.method} ${url.pathname}.`);
   };
 
+  /* A multipart send read whole: its fields, and its files each checked to
+   * be what its name says before any lands (t-fe28f948b4). */
+  const readSend = async (req) => {
+    const type = String(req.headers['content-type'] || '');
+    if (!type.startsWith('multipart/form-data')) throw new HttpError(400, 'bad-body', 'Send the drop as multipart/form-data.');
+    const raw = await readBytes(req, MAX_SEND);
+    let form;
+    try { form = await new Response(raw, { headers: { 'content-type': type } }).formData(); } catch (_) { throw new HttpError(400, 'bad-body', 'The send is not readable multipart/form-data.'); }
+    const field = (k) => { const v = form.get(k); return typeof v === 'string' ? v.trim() : ''; };
+    const files = form.getAll('file').filter((f) => typeof f !== 'string');
+    const parts = [];
+    for (const f of files) {
+      if (f.size > MAX_DROP) throw new HttpError(413, 'too-large', `${f.name} is over ${Math.round(MAX_DROP / 1024 / 1024)} MB.`);
+      const bytes = Buffer.from(await f.arrayBuffer());
+      bronze.prepare({ bytes, name: f.name });
+      parts.push({ bytes, name: f.name });
+    }
+    return { field, parts, files };
+  };
+
   /* CanvasX's chat beside an agent canvas (t-2ffa1ff1de): only these, and
    * only for a canvas assigned to the agent. */
   const linkRoutes = async (req, res, url) => {
@@ -492,14 +499,35 @@ export async function startServer({
       res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify(body));
     };
-    const r = /^\/api\/link\/canvases\/([^/]+)(\/ask)?$/.exec(url.pathname);
+    const r = /^\/api\/link\/canvases\/([^/]+)(\/ask|\/send)?$/.exec(url.pathname);
     if (!r) throw new HttpError(404, 'no-route', `No ${req.method} ${url.pathname}.`);
     const name = decodeURIComponent(r[1]);
     const fdir = fabricDir(needWorkspace(), name);
     if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
     if (!isAgentCanvas(fdir)) throw new HttpError(409, 'not-agent', `${name} is not assigned to the agent.`);
     if (req.method === 'GET' && !r[2]) return json(200, { name, chat: agent.chat(name, 100), ask: arranger.report(name), model: arranger.model(), models: MODELS });
-    if (req.method === 'POST' && r[2]) {
+    /* Files and images attached in the chat: drops of this canvas, landed as
+     * placing so the placer leaves them to the chat agent, which places them
+     * as the message says (t-79ac13d22a, t-291d7e41be, t-9bc7df3233). */
+    if (req.method === 'POST' && r[2] === '/send') {
+      if (arranger.running) throw new HttpError(409, 'busy', `The agent is still working on ${arranger.running.canvas} - send again once it is done.`);
+      const { field, parts } = await readSend(req);
+      const ask = field('message');
+      const model = field('model') || undefined;
+      if (!parts.length) throw new HttpError(400, 'empty', 'Attach a file or an image - words alone go with the chat\'s Send.');
+      if (ask.length > MAX_ASK) throw new HttpError(413, 'too-large', `A message to the agent can be at most ${MAX_ASK} characters.`);
+      if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
+      const send = 's-' + crypto.randomBytes(5).toString('hex');
+      const ids = parts.map((part) => {
+        const d = bronze.land({ ...part, ask: ask || null, send, canvas: name, via: 'canvasx' });
+        bronze.mark(d.id, 'placing', 'The agent in the chat is placing it.');
+        return d.id;
+      });
+      const job = arranger.ask(name, ask, model, { source: 'canvasx', drops: ids });
+      if (model !== undefined) { config.arranger = { ...(config.arranger || {}), model }; saveConfig(); }
+      return json(202, { ask: job, drops: ids });
+    }
+    if (req.method === 'POST' && r[2] === '/ask') {
       const { ask, model } = await readJson(req);
       if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"}.');
       if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);

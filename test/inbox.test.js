@@ -276,3 +276,50 @@ test('an agent canvas is always kept in RAGX: switching it on changes nothing, o
   assert.equal((await call('PUT', '/api/fabrics/Harness/sync', { body: { on: true } })).status, 200);
   assert.ok((await call('GET', '/api/state')).body.sync.Harness, 'reported as kept');
 });
+
+test('CanvasX\'s chat sends attachments through the link: kept as drops of the canvas and placed by the chat agent (t-9bc7df3233)', async () => {
+  const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), 'notex-chatsend-'));
+  const ws3 = path.join(tmp3, 'ws');
+  for (const name of ['Board', 'Mine']) {
+    fs.mkdirSync(path.join(ws3, name), { recursive: true });
+    fs.writeFileSync(path.join(ws3, name, 'fabric.json'), JSON.stringify({ areas: [], drawings: [], files: [], links: [], totems: [] }));
+  }
+  fs.writeFileSync(path.join(ws3, 'Board', 'agent.json'), '{}');
+  const data3 = path.join(tmp3, 'data');
+  fs.mkdirSync(data3);
+  fs.writeFileSync(path.join(data3, 'config.json'), JSON.stringify({ workspace: ws3, placing: false, ragx: path.join(tmp3, 'no-ragx') }));
+  const asked = [];
+  // A stand-in for Claude: it places whatever drops the prompt was given.
+  const arrangerRun = async (req) => {
+    asked.push(req);
+    const ids = [...new Set([...req.prompt.matchAll(/- id: (d-[0-9a-f]{10})/g)].map((m) => m[1]))];
+    return { text: `Placed.\n\`\`\`xml\n<Canvas name="Board"><Totem name="Inbox">${ids.map((id) => `<File drop="${id}"/>`).join('')}</Totem></Canvas>\n\`\`\`` };
+  };
+  const s3 = await startServer({ dataDir: data3, port: 0, runtimeFile: path.join(tmp3, 'plugin', 'runtime.json'), log: () => {}, signals: false, syncOptions: { arrangerRun } });
+  try {
+    const send = async (canvas, fields, files = []) => {
+      const fd = new FormData();
+      for (const [n, b] of files) fd.append('file', new Blob([b]), n);
+      for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+      const res = await fetch(`${s3.url}/api/link/canvases/${encodeURIComponent(canvas)}/send`, { method: 'POST', headers: { 'x-notex-link': s3.linkToken }, body: fd });
+      return { status: res.status, body: await res.json() };
+    };
+    assert.equal((await send('Board', { message: 'hi' })).body.error.code, 'empty');
+    assert.equal((await send('Board', { message: 'x', model: 'gpt' }, [['a.pdf', PDF]])).body.error.code, 'bad-model');
+    assert.equal((await send('Mine', { message: 'x' }, [['a.pdf', PDF]])).status, 409);
+    assert.equal((await send('Board', { message: 'x' }, [['fake.png', Buffer.from('nope')]])).body.error.code, 'not-kind');
+    const r = await send('Board', { message: 'file the survey', model: 'haiku' }, [['survey.pdf', PDF]]);
+    assert.equal(r.status, 202, JSON.stringify(r.body));
+    const [id] = r.body.drops;
+    for (let i = 0; i < 50 && (await (await fetch(`${s3.url}/api/link/canvases/Board`, { headers: { 'x-notex-link': s3.linkToken } })).json()).ask.status === 'working'; i++) await new Promise((res) => setTimeout(res, 50));
+    const chat = (await (await fetch(`${s3.url}/api/link/canvases/Board`, { headers: { 'x-notex-link': s3.linkToken } })).json());
+    assert.equal(chat.ask.status, 'done', chat.ask.detail);
+    assert.equal(asked[0].model, 'haiku');
+    assert.deepEqual(chat.chat[0].attachments, [{ id, name: 'survey.pdf', kind: 'pdf' }]);
+    const drop = (await (await fetch(`${s3.url}/api/inbox`, { headers: { 'x-notex-token': s3.token } })).json()).drops.find((d) => d.id === id);
+    assert.deepEqual([drop.status, drop.canvas, drop.ask, drop.via], ['placed', 'Board', 'file the survey', 'canvasx']);
+  } finally {
+    await s3.stop();
+    fs.rmSync(tmp3, { recursive: true, force: true });
+  }
+});

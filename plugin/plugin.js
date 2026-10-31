@@ -797,6 +797,8 @@ function renderChat(ul, chat) {
     const li = el('li', `${t.who === 'user' ? 'user' : 'agent'}${t.status === 'failed' ? ' bad' : ''}`);
     const who = t.who === 'user' ? `You${t.source === 'canvasx' ? ', in CanvasX' : ''}` : `Agent (${MODEL_LABEL[t.model] || t.model})${t.totems && t.totems.length ? ` · changed ${t.totems.join(', ')}` : ''}`;
     li.append(el('span', 'who', `${who} · ${ago(t.at)}`), document.createTextNode(t.text || ''));
+    // Files attached in CanvasX's chat (t-79ac13d22a).
+    if (t.attachments && t.attachments.length) li.append(el('span', 'attached', `📎 ${t.attachments.map((a) => a.name).join(', ')}`));
     ul.append(li);
   }
   if (atEnd || ul.dataset.count !== String(chat.length)) ul.scrollTop = ul.scrollHeight;

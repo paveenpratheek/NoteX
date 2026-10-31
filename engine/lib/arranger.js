@@ -19,6 +19,11 @@
  * or from NoteX's page (t-2ffa1ff1de): the agent is shown the last 10 turns,
  * answers in a few sentences, and adds scripts only when the user asks for
  * a change (t-e49cda284a). Every turn goes into the canvas's chat.jsonl.
+ *
+ * A turn can carry files and images the user attached in the chat: they are
+ * drops of the canvas, landed as placing so the placer leaves them alone,
+ * and the answer must place every one of them as the message says; a turn
+ * that fails marks them failed (t-79ac13d22a, t-291d7e41be).
  */
 import { parseScript, ScriptError } from './script.js';
 import { isAgentCanvas } from './agentcanvas.js';
@@ -116,7 +121,7 @@ export function checkArrangement(scripts, canvas, before) {
 /* drops: what each drop="..." on the canvas is, since the scripts name
  * drops only by id (t-1b478f9e6b); images go along as images (t-76e54ab623).
  * history: the turns before this one, oldest first (t-e49cda284a). */
-export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops = '', skipped = [], history = [] }) {
+export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops = '', skipped = [], history = [], attached = '' }) {
   const now = scripts.filter((s) => s.script);
   const said = history.slice(-HISTORY).map((t) => `${t.who === 'user' ? 'User' : 'You'}: ${t.text}`);
   return [
@@ -132,7 +137,13 @@ export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops =
     ask,
     '>>>',
     '',
-    'Answer the user in a few plain sentences. If the message only asks about the canvas, answer and add no script.',
+    ...(attached ? [
+      'The user attached these with the message. Place every one of them on the canvas where the message says - or where it fits best - each by its drop id: typed text or Markdown with <Note name="..." drop="d-..."/> or <Text drop="d-..."/>, a PDF, Word file or image with <File drop="d-..."/>:',
+      attached,
+      '',
+    ] : []),
+    attached ? 'Answer the user in a few plain sentences, and add the scripts that place what they attached.'
+      : 'Answer the user in a few plain sentences. If the message only asks about the canvas, answer and add no script.',
     'If it asks for the canvas to change, also add one whole <Canvas name="' + canvas + '"><Totem name="...">...</Totem></Canvas> script, in its own ```xml block, for each totem you change or start. A totem you leave out stays as it is.',
     '- Keep everything the canvas holds - every note\'s words, every text, every file and every drop="..." - somewhere on the canvas, word for word. You may move it between boxes and totems, and make, rename, regroup or remove boxes.',
     '- Keep the names of the totems that are there: a totem cannot be deleted or renamed. To empty one, move what it holds into others and send it with what is left.',
@@ -169,17 +180,19 @@ export class Arranger {
 
   /* Starts an ask; its outcome is in report(canvas), the canvas's chat and
    * its activity. source says where the user wrote it: canvasx or notex. */
-  ask(canvas, words, model = null, { source = 'notex' } = {}) {
-    const ask = String(words || '').trim();
+  ask(canvas, words, model = null, { source = 'notex', drops = [] } = {}) {
+    const ask = String(words || '').trim() || (drops.length ? 'Place what I attached where it fits.' : '');
     if (!ask) throw new Refusal('Write what the agent should do with the canvas.');
     if (ask.length > ASK_MAX) throw new Refusal(`An ask can be at most ${ASK_MAX} characters.`);
     if (model != null && !MODELS.includes(model)) throw new Refusal(`"${model}" is not a model NoteX offers - pick ${MODELS.join(', ')}.`);
     if (!isAgentCanvas(this.writer.canvasDir(canvas))) throw new Refusal(`${canvas} is not assigned to the agent - the agent arranges only its own canvases.`);
     if (this.running) throw new Refusal(`The agent is still working on ${this.running.canvas} - ask again once it is done.`);
-    const job = { canvas, ask, model: model || this.model(), source, status: 'working', detail: null, reply: null, totems: [], askedAt: this.at(), doneAt: null };
+    const bronze = this.writer.agent.bronze;
+    const attachments = drops.map((id) => { const d = bronze.get(id); return { id, name: d.name || 'typed text', kind: d.kind }; });
+    const job = { canvas, ask, model: model || this.model(), source, drops: [...drops], status: 'working', detail: null, reply: null, totems: [], askedAt: this.at(), doneAt: null };
     job.history = this.writer.agent.chat(canvas, HISTORY);
     this.jobs.set(canvas, job);
-    this.writer.agent.say(canvas, { who: 'user', text: ask, model: job.model, source });
+    this.writer.agent.say(canvas, { who: 'user', text: ask, model: job.model, source, ...(attachments.length ? { attachments } : {}) });
     this.writer.agent.note(canvas, 'asked', { ask, model: job.model, source });
     this.running = job;
     job.done = this.work(job)
@@ -194,6 +207,13 @@ export class Arranger {
     const text = status === 'failed' ? [reply, detail].filter(Boolean).join('\n\n') : reply || (totems.length ? 'Done.' : '');
     this.writer.agent.say(job.canvas, { who: 'agent', text, status, totems, model: job.model });
     this.writer.agent.note(job.canvas, 'answered', { status, detail, totems, model: job.model });
+    // Attachments the turn could not place wait as failed, to be sent again from the Inbox.
+    for (const id of job.drops || []) {
+      try {
+        const d = this.writer.agent.bronze.get(id);
+        if (d.status === 'placing') this.writer.agent.bronze.mark(id, 'failed', `The agent could not place it from the chat: ${detail || 'no script placed it'}`);
+      } catch (e) { if (!(e instanceof BronzeError)) throw e; }
+    }
   }
 
   async work(job) {
@@ -201,10 +221,10 @@ export class Arranger {
     let reply = null;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       const before = this.writer.agent.scripts(job.canvas);
-      const { drops, images, skipped } = this.dropsOn(job.canvas);
+      const { drops, images, skipped, attached } = this.dropsOn(job.canvas, job.drops);
       let answer;
       try {
-        const prompt = buildArrangePrompt({ canvas: job.canvas, scripts: before, ask: job.ask, retry: reason, drops, skipped, history: job.history });
+        const prompt = buildArrangePrompt({ canvas: job.canvas, scripts: before, ask: job.ask, retry: reason, drops, skipped, history: job.history, attached });
         answer = await this.run({ prompt, images, system: SYSTEM, model: job.model, dataDir: this.dataDir });
       } catch (e) {
         if (e instanceof ClaudeError && ['not-logged-in', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) return this.finish(job, 'failed', e.message);
@@ -213,8 +233,10 @@ export class Arranger {
       }
       const scripts = extractScripts(answer.text);
       reply = replyOf(answer.text);
-      // Words only: a question about the canvas, answered (t-e49cda284a).
-      if (!scripts.length) return this.finish(job, 'answered', null, [], reply || '(no answer)');
+      // Words only: a question about the canvas, answered (t-e49cda284a) - unless files came with it.
+      if (!scripts.length && !job.drops.length) return this.finish(job, 'answered', null, [], reply || '(no answer)');
+      const unplaced = job.drops.filter((id) => !scripts.some((s) => s.includes(`drop="${id}"`)));
+      if (unplaced.length) { reason = `the scripts do not place ${unplaced.join(', ')}, which the user attached - put each on the canvas with drop="d-...".`; continue; }
       const checked = checkArrangement(scripts, job.canvas, before);
       if (checked.reason) { reason = checked.reason; continue; }
       try {
@@ -239,19 +261,23 @@ export class Arranger {
     return this.finish(job, 'failed', `The canvas was not changed: ${reason}`, [], reply);
   }
 
-  /* The drops on the canvas, described, with their images to look at. */
-  dropsOn(canvas) {
+  /* The drops on the canvas, and those just attached in the chat, described,
+   * with their images to look at - the attached ones' images first. */
+  dropsOn(canvas, attachedIds = []) {
     const bronze = this.writer.agent.bronze;
-    const seen = new Set(), list = [];
+    const seen = new Set(attachedIds), list = [], fresh = [];
+    for (const id of attachedIds) {
+      try { fresh.push({ drop: bronze.get(id), file: bronze.file(id) }); } catch (e) { if (!(e instanceof BronzeError)) throw e; }
+    }
     for (const { id } of this.writer.agent.placedDrops(canvas)) {
       if (seen.has(id)) continue;
       seen.add(id);
       try { list.push({ drop: bronze.get(id), file: bronze.file(id) }); } catch (e) { if (!(e instanceof BronzeError)) throw e; }
     }
-    const { images, skipped } = dropImages(list.map((x) => x.drop), (id) => bronze.file(id));
+    const { images, skipped } = dropImages([...fresh, ...list].map((x) => x.drop), (id) => bronze.file(id));
     const shown = new Set(images.map((im) => im.id));
-    const drops = list.map(({ drop, file }) => describeDrop(drop, file, this.dataDir, { shown, wordsMax: DROP_WORDS })).join('\n\n');
-    return { drops, images, skipped };
+    const say = (xs) => xs.map(({ drop, file }) => describeDrop(drop, file, this.dataDir, { shown, wordsMax: DROP_WORDS })).join('\n\n');
+    return { drops: say(list), attached: say(fresh), images, skipped };
   }
 
   async stop() { if (this.running) await this.running.done.catch(() => {}); }
