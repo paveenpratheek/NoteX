@@ -283,6 +283,16 @@ button.switch[aria-checked="true"]::before { background: var(--accent); }
 
 /* agent canvases: the canvases | one canvas's scripts and activity */
 .agents { flex: 1; display: flex; gap: 10px; min-height: 0; }
+/* The Phone view (t-71306596ff). */
+.phone { flex: 1; display: flex; min-height: 0; }
+.phone-sheet { flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.phone-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; color: var(--fg-2); font-size: 13px; }
+.phone-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; }
+.phone-crumbs button { border: 0; background: none; padding: 2px 4px; color: var(--accent); cursor: pointer; }
+.phone-crumbs span { color: var(--muted); }
+.phone-folders { flex: 0 1 auto; max-height: 340px; }
+.phone-result li { flex-wrap: wrap; }
+.activity.phone-result .when { flex: 0 0 150px; }
 .agent-detail { flex: 1 1 auto; overflow: auto; }
 #agent-body { display: flex; flex-direction: column; gap: 8px; }
 .ask-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; margin-bottom: 10px; }

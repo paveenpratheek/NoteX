@@ -94,4 +94,11 @@ export class Engine {
   agentCanvas(name) { return this.json('GET', `/api/agent-canvases/${encodeURIComponent(name)}`); }
   setAgent(name, on) { return this.json('PUT', `/api/fabrics/${encodeURIComponent(name)}/agent`, { on }); }
   render(name) { return this.json('POST', `/api/fabrics/${encodeURIComponent(name)}/render`); }
+  // The phone over the USB cable (t-71306596ff).
+  phone() { return this.json('GET', '/api/phone'); }
+  phoneDevices() { return this.json('GET', '/api/phone/devices'); }
+  phoneBrowse(device, segs) { return this.json('GET', `/api/phone/browse?device=${encodeURIComponent(device)}&path=${encodeURIComponent(JSON.stringify(segs))}`); }
+  setPhone(device, segs) { return this.json('PUT', '/api/phone', { device, path: segs }); }
+  forgetPhone() { return this.json('DELETE', '/api/phone'); }
+  syncPhone() { return this.json('POST', '/api/phone/sync'); }
 }

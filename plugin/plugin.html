@@ -19,6 +19,7 @@
     <button id="view-browse" class="on">Canvases</button>
     <button id="view-inbox">Inbox <span id="inbox-count" class="chip warn" hidden></span></button>
     <button id="view-agents">Agent canvases</button>
+    <button id="view-phone">Phone</button>
   </div>
   <div class="pill" role="status"><span class="dot" id="dot" aria-hidden="true"></span><span id="status">Looking for the engine…</span></div>
   <div class="bar-end">
@@ -148,6 +149,29 @@
         <pre id="totem-script" class="doc card" hidden></pre>
         <span class="eyebrow">Activity</span>
         <ul id="activity-list" class="activity"></ul>
+      </div>
+    </article>
+  </section>
+  <section id="phone" class="phone" hidden>
+    <article class="sheet phone-sheet" aria-label="Phone">
+      <div class="title-row"><h1 id="phone-title">Phone</h1><span class="note" id="phone-sub"></span></div>
+      <div id="phone-ready" hidden>
+        <p class="note">Plug the phone in with its USB cable and pick <strong>File transfer</strong> on the phone, then press the button. Close CanvasXP on the phone first, or go to its home screen.</p>
+        <div class="row"><button id="phone-sync" class="primary">Phone attached - sync</button><button id="phone-again">Set up again</button><button id="phone-forget" class="danger">Forget this phone</button></div>
+        <p class="note line-card" id="phone-line" hidden></p>
+        <ul id="phone-result" class="activity phone-result"></ul>
+      </div>
+      <div id="phone-setup" hidden>
+        <ol class="phone-steps">
+          <li>On the phone, open <strong>CanvasXP</strong>, open its target folder and press <strong>Set up USB sync</strong>.</li>
+          <li>Plug the phone into this PC with its USB cable and pick <strong>File transfer</strong> on the phone.</li>
+          <li>Pick the phone below, then open the same folder: NoteX knows it once it is there.</li>
+        </ol>
+        <div class="row"><select id="phone-device" aria-label="Phone"></select><button id="phone-look">Look for the phone</button></div>
+        <nav id="phone-crumbs" class="phone-crumbs" aria-label="Folder on the phone"></nav>
+        <ul id="phone-folders" class="list phone-folders"></ul>
+        <p class="note" id="phone-found"></p>
+        <div class="row"><button id="phone-use" class="primary" disabled>Use this folder</button><button id="phone-cancel" hidden>Cancel</button></div>
       </div>
     </article>
   </section>

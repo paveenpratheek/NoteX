@@ -69,11 +69,11 @@ function setStatus(kind, text) {
 }
 
 function show(which) {
-  for (const id of ['offline', 'workspace', 'browse', 'inbox', 'agents']) $(id).hidden = id !== which;
-  $('views').hidden = !['browse', 'inbox', 'agents'].includes(which);
+  for (const id of ['offline', 'workspace', 'browse', 'inbox', 'agents', 'phone']) $(id).hidden = id !== which;
+  $('views').hidden = !['browse', 'inbox', 'agents', 'phone'].includes(which);
 }
 
-const TABS = ['browse', 'inbox', 'agents'];
+const TABS = ['browse', 'inbox', 'agents', 'phone'];
 const markTab = (tab) => { for (const t of TABS) $(`view-${t}`).classList.toggle('on', t === tab); };
 
 /* Canvases, the Inbox or Agent canvases, switched from the bar and remembered. */
@@ -84,6 +84,7 @@ async function showTab(tab) {
   show(tab);
   if (tab === 'inbox') await loadInbox();
   else if (tab === 'agents') await loadAgents();
+  else if (tab === 'phone') await loadPhone();
   else if (!S.fabrics.length) await loadFabrics();
 }
 
@@ -119,6 +120,7 @@ async function refresh() {
   $('inbox-count').title = `${waitingDrops} drop${waitingDrops === 1 ? '' : 's'} waiting for a canvas`;
   if (S.tab === 'inbox') { show('inbox'); await loadInbox(); return; }
   if (S.tab === 'agents') { show('agents'); await loadAgents(); return; }
+  if (S.tab === 'phone') { show('phone'); if (!S.phoneBrowsing) renderPhone(st.phone); return; }
   show('browse');
   if (!was || !S.fabrics.length) await loadFabrics();
   else if (S.built) { renderSync((st.sync && st.sync[S.fabric]) || null); renderRules(st.rules); renderScripts(); } // a save in File Fabric starts a sync
@@ -837,6 +839,137 @@ async function setRagxFolder() {
   try { const r = await engine.setRagx(p); toast(`NoteX reads images through RAGX at ${r.ragx}.`); S.state.ragx = r.ragx; } catch (e) { toast(e.message, true); }
 }
 
+/* -------------------------------------------------------------- phone */
+
+/* The phone over the USB cable: set up once by browsing to CanvasXP's
+ * folder on it, then synced whenever the user says it is attached
+ * (t-71306596ff, t-76fdccd60b). */
+async function loadPhone() {
+  let r;
+  try { r = await engine.phone(); } catch (e) { toast(e.message, true); return; }
+  if (!r.setup) return startPhoneSetup();
+  renderPhone(r);
+}
+
+const list = (names) => names.map((n) => (typeof n === 'string' ? n : n.copy ? `${n.name} → ${n.copy}` : `${n.name} (from the ${n.from === 'pc' ? 'PC' : 'phone'})`)).join(', ');
+
+function renderPhone(r) {
+  if (!r || S.phoneBrowsing) return;
+  if (!r.setup) { startPhoneSetup(); return; }
+  $('phone-setup').hidden = true;
+  $('phone-ready').hidden = false;
+  $('phone-title').textContent = r.setup.name;
+  $('phone-sub').textContent = `${r.setup.device} · ${r.setup.path.join(' › ')}`;
+  $('phone-sync').disabled = r.running;
+  $('phone-sync').textContent = r.running ? 'Syncing…' : 'Phone attached - sync';
+  const line = $('phone-line');
+  const ul = $('phone-result');
+  ul.replaceChildren();
+  if (r.running) {
+    line.hidden = false;
+    line.textContent = `${r.progress || 'Working'}…`;
+    clearTimeout(renderPhone.timer);
+    renderPhone.timer = setTimeout(loadPhone, 1000);
+    return;
+  }
+  const last = r.last;
+  line.hidden = !last && !r.waiting;
+  if (!last) line.textContent = '';
+  else if (!last.ok) line.textContent = last.error;
+  else line.textContent = `Synced ${ago(last.at)}.`;
+  if (r.waiting) line.textContent += ` ${r.waiting} change${r.waiting === 1 ? '' : 's'} sent to the phone ${r.waiting === 1 ? 'waits' : 'wait'} for CanvasXP - open it on the phone to take ${r.waiting === 1 ? 'it' : 'them'} in.`;
+  line.classList.toggle('bad', Boolean(last && !last.ok));
+  if (!last || !last.ok) return;
+  const row = (label, names, bad = false) => {
+    if (!names || !names.length) return;
+    const li = el('li', bad ? 'bad' : null);
+    li.append(el('span', 'when', label), el('span', null, list(names)));
+    ul.append(li);
+  };
+  row('In from the phone', last.pulled);
+  row('Out to the phone', last.pushed);
+  row('Changed on both', last.conflicts);
+  row('Deleted', last.removed);
+  row('Open in CanvasX', last.open, true);
+  row('Changed after listing', last.stale, true);
+  row('Names left out', last.skipped, true);
+  if (!ul.children.length) ul.append(el('li', null, 'Nothing to do: the phone and the PC already agree.'));
+  if (last.open && last.open.length) ul.append(el('li', 'note', 'Canvases open in CanvasX on the PC wait for the next sync - go to CanvasX\'s home screen and sync again.'));
+  if (last.stale && last.stale.length) ul.append(el('li', 'note', 'Those changed on the phone after CanvasXP listed them: open CanvasXP on the phone once, then sync again.'));
+  if (last.conflicts && last.conflicts.length) ul.append(el('li', 'note', 'Both kept: the PC\'s version under its own name, the phone\'s beside it, on the PC and on the phone.'));
+}
+
+async function syncPhone() {
+  try { renderPhone(await engine.syncPhone()); } catch (e) { toast(e.message, true); }
+}
+
+async function startPhoneSetup() {
+  S.phoneBrowsing = true;
+  $('phone-ready').hidden = true;
+  $('phone-setup').hidden = false;
+  $('phone-title').textContent = 'Set up the phone';
+  $('phone-sub').textContent = '';
+  $('phone-cancel').hidden = !(S.state && S.state.phone && S.state.phone.setup);
+  await lookForPhones();
+}
+
+async function lookForPhones() {
+  const sel = $('phone-device');
+  $('phone-found').textContent = 'Looking for phones…';
+  $('phone-folders').replaceChildren();
+  $('phone-crumbs').replaceChildren();
+  $('phone-use').disabled = true;
+  let devices = [];
+  try { devices = (await engine.phoneDevices()).devices; } catch (e) { $('phone-found').textContent = e.message; return; }
+  sel.replaceChildren(...devices.map((d) => { const o = el('option', null, d.name); o.value = d.name; return o; }));
+  if (!devices.length) {
+    $('phone-found').textContent = 'No phone found. Plug it in, unlock it, and pick File transfer in the USB notification - then look again.';
+    return;
+  }
+  await browsePhone(devices[0].name, []);
+}
+
+async function browsePhone(device, segs) {
+  S.phoneAt = { device, segs };
+  $('phone-found').textContent = 'Reading the phone…';
+  $('phone-use').disabled = true;
+  let r;
+  try { r = await engine.phoneBrowse(device, segs); } catch (e) { $('phone-found').textContent = e.message; return; }
+  if (S.phoneAt.device !== device || S.phoneAt.segs !== segs) return; // another folder was opened meanwhile
+  const crumbs = $('phone-crumbs');
+  crumbs.replaceChildren();
+  const crumb = (label, to) => { const b = el('button', null, label); b.addEventListener('click', () => browsePhone(device, to)); crumbs.append(b); };
+  crumb(device, []);
+  segs.forEach((s, i) => { crumbs.append(el('span', null, '›')); crumb(s, segs.slice(0, i + 1)); });
+  const ul = $('phone-folders');
+  ul.replaceChildren();
+  for (const f of r.folders) {
+    const b = el('button', null);
+    b.append(el('span', 'name', f));
+    b.addEventListener('click', () => browsePhone(device, [...segs, f]));
+    const li = el('li', null);
+    li.append(b);
+    ul.append(li);
+  }
+  if (r.canvasxp) {
+    $('phone-found').textContent = `This is CanvasXP's folder on "${r.canvasxp.name}".`;
+    $('phone-use').disabled = false;
+  } else {
+    $('phone-found').textContent = r.folders.length ? 'Open the folder you picked in CanvasXP.' : 'No folders here.';
+  }
+}
+
+async function usePhoneFolder() {
+  const { device, segs } = S.phoneAt || {};
+  if (!device) return;
+  try {
+    const r = await engine.setPhone(device, segs);
+    S.phoneBrowsing = false;
+    toast(`${r.phone.name} is set up - syncing now.`);
+    await syncPhone();
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ------------------------------------------------------------- wiring */
 
 $('start-btn').addEventListener('click', startEngine);
@@ -874,6 +1007,17 @@ $('show-doc').addEventListener('click', () => showView('doc'));
 $('view-browse').addEventListener('click', () => showTab('browse'));
 $('view-inbox').addEventListener('click', () => showTab('inbox'));
 $('view-agents').addEventListener('click', () => showTab('agents'));
+$('view-phone').addEventListener('click', () => showTab('phone'));
+$('phone-sync').addEventListener('click', syncPhone);
+$('phone-again').addEventListener('click', startPhoneSetup);
+$('phone-forget').addEventListener('click', async () => {
+  if (!confirm('Forget this phone? Its canvases stay where they are; setting it up again starts afresh, and canvases that differ then are kept side by side.')) return;
+  try { await engine.forgetPhone(); S.phoneBrowsing = false; await loadPhone(); } catch (e) { toast(e.message, true); }
+});
+$('phone-look').addEventListener('click', lookForPhones);
+$('phone-device').addEventListener('change', (e) => browsePhone(e.target.value, []));
+$('phone-use').addEventListener('click', usePhoneFolder);
+$('phone-cancel').addEventListener('click', () => { S.phoneBrowsing = false; loadPhone(); });
 $('agents-reload').addEventListener('click', loadAgents);
 $('assign-btn').addEventListener('click', toggleAssign);
 $('render-btn').addEventListener('click', drawAgain);

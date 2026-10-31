@@ -18,6 +18,8 @@
  * ledger of what each wrote and the backups taken before every write
  * (t-a80b904d43). <data>/bronze/ is the Inbox: what the user drops, kept as
  * it arrived until it is placed on an agent canvas (t-1c0fff1756).
+ * <data>/phone/ is the phone sync's: what the workspace and CanvasXP's folder
+ * on the phone last agreed on, and backups (t-71306596ff).
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -43,6 +45,8 @@ import { Placer } from './placer.js';
 import { Arranger, MODELS } from './arranger.js';
 import { DropSync } from './dropsync.js';
 import { forgetDrop } from './forget.js';
+import { PhoneSync, PhoneError } from './phone.js';
+import { ShellTransport } from './mtp.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -71,6 +75,7 @@ function statusOf(e) {
   if (e instanceof Refusal) return 409;
   if (e instanceof FabricError) return e.code === 'not-found' || e.code === 'no-workspace' ? 404 : e.code === 'bad-json' ? 409 : 500;
   if (e instanceof RagxError) return 503;
+  if (e instanceof PhoneError) return e.code === 'bad-path' ? 400 : e.code === 'mtp' || e.code === 'timeout' ? 502 : 409;
   return 500;
 }
 
@@ -177,6 +182,14 @@ export async function startServer({
   const placer = new Placer({ config, dataDir: dir, bronze, writer, log, ...(syncOptions.placerRun ? { run: syncOptions.placerRun } : {}), ...(syncOptions.pollMs ? { pollMs: syncOptions.pollMs } : {}) });
   // The user asks the agent about one of its canvases (t-a9198c414f).
   const arranger = new Arranger({ config, dataDir: dir, writer, log, ...(syncOptions.arrangerRun ? { run: syncOptions.arrangerRun } : {}) });
+  /* The phone over the USB cable: CanvasXP's folder there and the workspace
+   * kept the same; what comes from the phone is kept in RAGX (t-71306596ff,
+   * t-76fdccd60b). */
+  const phone = new PhoneSync({
+    config, saveConfig, dataDir: dir, log, transport: syncOptions.phoneTransport || new ShellTransport(),
+    isOpen: (fdir) => writer.isOpen(fdir),
+    keep: (name) => { if (!(config.sync && config.sync[name])) sync.set(name, true); },
+  });
 
   /* The canvases assigned to the agent: those whose folder holds the
    * agent.json CanvasX writes. Only they take drops (t-52f040cf72). */
@@ -239,7 +252,30 @@ export async function startServer({
     if (m('GET', /^\/api\/state$/)) {
       const drops = bronze.list();
       const inbox = { drops: drops.length, waiting: drops.filter((d) => d.status === 'waiting').length };
-      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), inbox, placer: placer.report(), ...workspaceState() });
+      return json(200, { version: VERSION, pid: process.pid, dataDir: dir, ragx: ragxFolder(config.ragx), reading, sync: sync.report(), rules: rules.report(), scripts: writer.report(), inbox, placer: placer.report(), phone: phone.report(), ...workspaceState() });
+    }
+    /* The phone: set up by browsing to CanvasXP's folder on it, then synced
+     * when the user says it is attached (t-71306596ff). */
+    if (m('GET', /^\/api\/phone$/)) return json(200, phone.report());
+    if (m('GET', /^\/api\/phone\/devices$/)) return json(200, { devices: await phone.devices() });
+    if (m('GET', /^\/api\/phone\/browse$/)) {
+      const device = url.searchParams.get('device');
+      let segs = [];
+      try { segs = JSON.parse(url.searchParams.get('path') || '[]'); } catch (_) { throw new HttpError(400, 'bad-path', 'path is a JSON list of folder names.'); }
+      if (!device || !Array.isArray(segs) || !segs.every((s) => typeof s === 'string' && s)) throw new HttpError(400, 'bad-path', 'Send device and path, a JSON list of folder names.');
+      return json(200, await phone.browse(device, segs));
+    }
+    if (m('PUT', /^\/api\/phone$/)) {
+      const { device, path: segs } = await readJson(req);
+      if (typeof device !== 'string' || !device) throw new HttpError(400, 'bad-body', 'Send {"device": "...", "path": ["...", ...]}.');
+      return json(200, { phone: await phone.setup(device, segs) });
+    }
+    if (m('DELETE', /^\/api\/phone$/)) { phone.forget(); return json(200, phone.report()); }
+    if (m('POST', /^\/api\/phone\/sync$/)) {
+      if (!config.phone) throw new HttpError(409, 'no-phone', 'Set up the phone first.');
+      needWorkspace();
+      phone.sync();
+      return json(202, phone.report());
     }
     /* Whether the agent places queued drops by itself - off, they wait in
      * the queue - and with which Claude model (t-fe1817678b). */
@@ -551,7 +587,7 @@ export async function startServer({
     if (origin && !allowedOrigin) return refuse(403, 'bad-origin', `Requests from ${origin} are not accepted.`);
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
-        'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'access-control-allow-headers': 'X-Notex-Token, X-Notex-Link, Content-Type, X-Drop-Name, X-Drop-Note, X-Drop-Canvas',
         'access-control-max-age': '600',
       });
@@ -603,6 +639,7 @@ export async function startServer({
       await placer.stop();
       await arranger.stop();
       await dropSync.stop();
+      if (phone.running) await phone.running.catch(() => {});
       await writer.stop();
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();
