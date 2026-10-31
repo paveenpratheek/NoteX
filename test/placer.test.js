@@ -230,3 +230,37 @@ test('a message cannot send drops onto the user\'s own canvas, nor move a drop t
   const plain = s.bronze.land({ text: 'no message' });
   assert.throws(() => s.bronze.choose(plain.id, null, { byMessage: true }), /no message for the agent/);
 });
+
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('a picture of a car')]);
+
+test('the agent sees an image drop itself, labelled by its id, and Claude gets it as an image block (t-76e54ab623)', async (t) => {
+  const { imageInput, resultOf } = await import('../engine/lib/claude.js');
+  const msg = JSON.parse(imageInput('Place it.', [{ label: 'The image of drop d-1:', mediaType: 'image/png', data: PNG }]));
+  assert.deepEqual(msg.message.content.map((c) => c.type), ['text', 'image', 'text']);
+  assert.equal(msg.message.content[1].source.media_type, 'image/png');
+  assert.equal(Buffer.from(msg.message.content[1].source.data, 'base64').toString('latin1'), PNG.toString('latin1'));
+  assert.equal(resultOf('{"type":"system"}\n{"type":"assistant"}\n{"type":"result","result":"ok"}\n').result, 'ok');
+  assert.equal(resultOf('{"result":"plain"}').result, 'plain');
+
+  const s = setup(t, []);
+  const d = s.bronze.land({ bytes: PNG, name: 'forza.png', note: 'my best lap', canvas: 'Board' });
+  const asked = [];
+  s.placer.run = async (req) => { asked.push(req); return { text: fence(`<Canvas name="Board"><Totem name="Cars"><File drop="${d.id}"/></Totem></Canvas>`) }; };
+  assert.equal((await s.placer.tick()).status, 'placed');
+  const { images, prompt } = asked[0];
+  assert.equal(images.length, 1);
+  assert.equal(images[0].label, `The image of drop ${d.id} (forza.png):`);
+  assert.equal(images[0].mediaType, 'image/png');
+  assert.ok(images[0].data.equals(PNG));
+  assert.match(prompt, new RegExp(`the image itself is attached above, labelled "drop ${d.id}"`));
+  assert.ok(prompt.includes('my best lap'));
+});
+
+test('an image too large for Claude is named as not attached (t-480e539f30)', async (t) => {
+  const { dropImages, IMAGE_BYTES } = await import('../engine/lib/placer.js');
+  const s = setup(t, []);
+  const big = s.bronze.land({ bytes: Buffer.concat([PNG, Buffer.alloc(IMAGE_BYTES)]), name: 'huge.png' });
+  const r = dropImages([s.bronze.get(big.id)], (id) => s.bronze.file(id));
+  assert.deepEqual(r.images, []);
+  assert.deepEqual(r.skipped, [`${big.id} (over 3.75 MB)`]);
+});

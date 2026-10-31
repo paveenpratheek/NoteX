@@ -123,3 +123,20 @@ test('only an agent canvas, one ask at a time, a known model; Claude at a limit 
   assert.equal(s.arranger.model(), 'haiku');
   assert.ok(parseScript(s.script('Bugs')));
 });
+
+test('an ask shows what each drop on the canvas is and attaches its images (t-1b478f9e6b, t-76e54ab623)', async (t) => {
+  const s = await setup(t);
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('lap')]);
+  const bronze = s.writer.agent.bronze;
+  const img = bronze.land({ bytes: PNG, name: 'lap.png', note: 'Forza 6, Spa', canvas: 'Board' });
+  const words = bronze.land({ text: 'tune the gearbox before Spa', canvas: 'Board' });
+  const shots = `<Canvas name="Board"><Totem name="Shots"><File drop="${img.id}"/><Note name="Tune" drop="${words.id}"/></Totem></Canvas>`;
+  assert.equal((await s.writer.submit({ script: shots, owner: 'NoteX placer' })).status, 'written');
+  s.answers.push(fence(shots));
+  const r = await asked(s, 'look at the screenshots and regroup them');
+  assert.equal(r.status, 'done', r.detail);
+  const { images, prompt } = s.asked[0];
+  assert.deepEqual(images.map((im) => im.label), [`The image of drop ${img.id} (lap.png):`]);
+  assert.ok(prompt.includes('Forza 6, Spa') && prompt.includes('tune the gearbox before Spa'));
+  assert.match(prompt, new RegExp(`the image itself is attached above, labelled "drop ${img.id}"`));
+});

@@ -36,6 +36,9 @@ export const OWNER = 'NoteX placer';
 const ATTEMPTS = 2;
 const WORDS_MAX = 4_000;
 const KIND_WORD = { text: 'typed text', md: 'a Markdown file', pdf: 'a PDF', docx: 'a Word file', image: 'an image' };
+const MEDIA = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+export const IMAGE_MAX = 20;
+export const IMAGE_BYTES = 3_750_000; // 5 MB once base64, Claude's limit for one image
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const many = (x) => (Array.isArray(x) ? x : [x]);
 
@@ -101,18 +104,37 @@ export function checkAnswer(script, drops, canvas, scripts) {
   return null;
 }
 
-/* What the model is shown of a drop: its own words for text and Markdown,
- * an image's kept Haiku reading, else only its name and the user's
- * description (t-b42fdae168). */
-export function describeDrop(drop, file, dataDir) {
+/* The image drops as image blocks for Claude, each labelled with its drop
+ * id, so the agent looks at the images themselves (t-76e54ab623). Past 20,
+ * or over 3.75 MB, an image is named as not shown instead (t-480e539f30). */
+export function dropImages(drops, fileOf) {
+  const images = [], skipped = [];
+  for (const d of drops) {
+    if (d.kind !== 'image') continue;
+    let file, size;
+    try { file = fileOf(d.id); size = fs.statSync(file).size; } catch (_) { continue; } // forgotten meanwhile
+    const mediaType = MEDIA[path.extname(file).toLowerCase()];
+    if (!mediaType || size > IMAGE_BYTES) { skipped.push(`${d.id} (${mediaType ? 'over 3.75 MB' : 'not a kind Claude reads'})`); continue; }
+    if (images.length >= IMAGE_MAX) { skipped.push(`${d.id} (more than ${IMAGE_MAX} images)`); continue; }
+    images.push({ id: d.id, label: `The image of drop ${d.id}${d.name ? ` (${d.name})` : ''}:`, mediaType, data: fs.readFileSync(file) });
+  }
+  return { images, skipped };
+}
+
+/* What the model is shown of a drop: its own words for text and Markdown;
+ * for an image, the image itself when it goes with the prompt, and any kept
+ * Haiku reading; for a PDF or Word file only its name and the user's
+ * description (t-b42fdae168, t-76e54ab623, t-8923a26fb5). */
+export function describeDrop(drop, file, dataDir, { shown = new Set(), wordsMax = WORDS_MAX } = {}) {
   const lines = [`- id: ${drop.id}`, `- what: ${KIND_WORD[drop.kind] || drop.kind}`];
   if (drop.name) lines.push(`- name: ${drop.name}`);
   if (drop.note) lines.push(`- the user's description of it: ${drop.note}`);
   if (drop.kind === 'text' || drop.kind === 'md') {
     let words = '';
     try { words = fs.readFileSync(file, 'utf8'); } catch (_) { /* forgotten meanwhile */ }
-    lines.push(`- its words${words.length > WORDS_MAX ? ` (the first ${WORDS_MAX} characters)` : ''}:`, '<<<', words.slice(0, WORDS_MAX).trim(), '>>>');
+    lines.push(`- its words${words.length > wordsMax ? ` (the first ${wordsMax} characters)` : ''}:`, '<<<', words.slice(0, wordsMax).trim(), '>>>');
   } else if (drop.kind === 'image') {
+    lines.push(shown.has(drop.id) ? `- the image itself is attached above, labelled "drop ${drop.id}" - look at it` : '- the image is not attached');
     const sha = path.basename(file).replace(/\.[^.]+$/, '');
     const r = new Readings(dataDir).get(sha);
     if (r) lines.push(`- what it shows (machine-read): ${[r.description, r.text].filter(Boolean).join(' / ')}`);
@@ -131,7 +153,7 @@ const canvasNow = (scripts) => {
 
 /* canvas is the canvas the user chose; null leaves it to the user's message,
  * and canvases then holds every agent canvas with its scripts. */
-export function buildPrompt({ drop, drops, file, files, canvas, scripts = [], canvases = [], ask = null, dataDir, retry = null }) {
+export function buildPrompt({ drop, drops, file, files, canvas, scripts = [], canvases = [], ask = null, dataDir, retry = null, shown = new Set(), skipped = [] }) {
   drops = many(drops || drop);
   files = many(files || file);
   const one = drops.length === 1;
@@ -144,7 +166,8 @@ export function buildPrompt({ drop, drops, file, files, canvas, scripts = [], ca
     ...where,
     '',
     one ? 'The drop:' : 'The drops:',
-    drops.map((d, i) => describeDrop(d, files[i], dataDir)).join('\n\n'),
+    drops.map((d, i) => describeDrop(d, files[i], dataDir, { shown })).join('\n\n'),
+    ...(skipped.length ? [`Images not attached: ${skipped.join(', ')}.`] : []),
     ...(ask ? ['', 'The user\'s message to you about this - follow it for where it goes and what things are called:', '<<<', ask, '>>>'] : []),
     '',
     canvas
@@ -247,10 +270,12 @@ export class Placer {
       try { files = drops.map((d) => this.bronze.file(d.id)); } catch (e) { if (e instanceof BronzeError) return { status: 'forgotten' }; throw e; }
       const canvases = byMessage ? this.agentCanvases().map((name) => ({ name, scripts: this.writer.agent.scripts(name) })) : [];
       const scripts = byMessage ? [] : this.writer.agent.scripts(lead.canvas);
+      const { images, skipped } = dropImages(drops, (id) => this.bronze.file(id));
+      const shown = new Set(images.map((im) => im.id));
       let answer;
       try {
-        const prompt = buildPrompt({ drops, files, canvas: byMessage ? null : lead.canvas, scripts, canvases, ask: lead.ask, dataDir: this.dataDir, retry: reason });
-        answer = await this.run({ prompt, system: SYSTEM, model, dataDir: this.dataDir });
+        const prompt = buildPrompt({ drops, files, canvas: byMessage ? null : lead.canvas, scripts, canvases, ask: lead.ask, dataDir: this.dataDir, retry: reason, shown, skipped });
+        answer = await this.run({ prompt, images, system: SYSTEM, model, dataDir: this.dataDir });
       } catch (e) {
         if (e instanceof ClaudeError && ['not-logged-in', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) {
           this.holdUntil = this.now() + HOLD_MS;

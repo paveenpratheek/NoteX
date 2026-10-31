@@ -11,6 +11,8 @@
  * - It runs in <data>/agent, which must sit outside any git repository,
  *   where GitX's hooks would record its answers.
  * - After the time-out its whole process tree is ended.
+ * - Images go with the prompt as image blocks in stream-json input, each
+ *   after a line naming it, as RAGX sends figures (t-76e54ab623).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,11 +58,36 @@ const killTree = (pid) => {
   else { try { process.kill(pid, 'SIGTERM'); } catch (_) { /* gone */ } }
 };
 
-/* One prompt, one answer. */
-export function runClaude({ prompt, system = null, model = 'sonnet', dataDir, timeoutMs = 180_000, executable = null }) {
+/* The stream-json message for a prompt with images: [{ label, mediaType, data }]. */
+export function imageInput(prompt, images) {
+  const content = [];
+  for (const im of images) {
+    content.push({ type: 'text', text: im.label });
+    content.push({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: Buffer.from(im.data).toString('base64') } });
+  }
+  content.push({ type: 'text', text: prompt });
+  return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
+}
+
+/* The result line of Claude Code's output: its one JSON object, or the
+ * last {"type": "result"} event of a stream. */
+export function resultOf(out) {
+  const lines = out.trim().split('\n').filter((l) => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const r = JSON.parse(lines[i]);
+      if (r && (r.type === 'result' || i === lines.length - 1)) return r;
+    } catch (_) { /* not JSON */ }
+  }
+  return null;
+}
+
+/* One prompt, one answer; images, when given, go with it. */
+export function runClaude({ prompt, images = [], system = null, model = 'sonnet', dataDir, timeoutMs = 180_000, executable = null }) {
   const exe = executable || findClaude();
   const cwd = agentFolder(dataDir);
-  const args = ['-p', '--output-format', 'json', '--safe-mode', '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--model', model];
+  const io = images.length ? ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'] : ['--output-format', 'json'];
+  const args = ['-p', ...io, '--safe-mode', '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--model', model];
   if (system) args.push('--append-system-prompt', system);
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -75,12 +102,11 @@ export function runClaude({ prompt, system = null, model = 'sonnet', dataDir, ti
     child.stdin.on('error', () => { /* it exited before reading; its exit says why */ });
     child.on('error', (e) => end(reject, new ClaudeError('not-found', `Could not start ${exe}: ${e.message}`)));
     child.on('close', (code) => {
-      let r = null;
-      try { r = JSON.parse(out.trim().split('\n').pop()); } catch (_) { /* not JSON */ }
+      const r = resultOf(out);
       if (!r) return end(reject, classify(err.trim() || `claude exited with code ${code} and no answer`));
       if (r.is_error || (r.subtype && r.subtype !== 'success')) return end(reject, classify(String(r.result || r.subtype)));
       end(resolve, { text: String(r.result || ''), model, cost: r.total_cost_usd ?? null, ms: Date.now() - started });
     });
-    child.stdin.end(prompt);
+    child.stdin.end(images.length ? imageInput(prompt, images) : prompt);
   });
 }

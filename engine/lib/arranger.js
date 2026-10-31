@@ -20,12 +20,15 @@ import { isAgentCanvas } from './agentcanvas.js';
 import { runClaude, ClaudeError } from './claude.js';
 import { FORMAT } from './format.js';
 import { Refusal } from './layout.js';
+import { dropImages, describeDrop } from './placer.js';
+import { BronzeError } from './bronze.js';
 
 export const OWNER = 'NoteX agent';
 export const MODELS = ['sonnet', 'opus', 'haiku'];
 export const ASK_MAX = 4_000;
 const ATTEMPTS = 2;
 const RENDER_TRIES = 3;
+const DROP_WORDS = 1_500;
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
 const SYSTEM = [
@@ -95,7 +98,9 @@ export function checkArrangement(scripts, canvas, before) {
   return { overrides: overrides.map(({ name, script }) => ({ name, script, owner: OWNER })) };
 }
 
-export function buildArrangePrompt({ canvas, scripts, ask, retry = null }) {
+/* drops: what each drop="..." on the canvas is, since the scripts name
+ * drops only by id (t-1b478f9e6b); images go along as images (t-76e54ab623). */
+export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops = '', skipped = [] }) {
   const now = scripts.filter((s) => s.script);
   return [
     `Arrange the canvas "${canvas}" as the user asks.`,
@@ -103,6 +108,7 @@ export function buildArrangePrompt({ canvas, scripts, ask, retry = null }) {
     'The canvas now, one script per totem:',
     now.length ? now.map((s) => s.script.trim()).join('\n\n') : '(empty - no totems yet)',
     '',
+    ...(drops ? ['What each drop="..." on it is:', drops, ...(skipped.length ? [`Images not attached: ${skipped.join(', ')}.`] : []), ''] : []),
     'The user\'s request:',
     '<<<',
     ask,
@@ -168,9 +174,11 @@ export class Arranger {
     let reason = null;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       const before = this.writer.agent.scripts(job.canvas);
+      const { drops, images, skipped } = this.dropsOn(job.canvas);
       let answer;
       try {
-        answer = await this.run({ prompt: buildArrangePrompt({ canvas: job.canvas, scripts: before, ask: job.ask, retry: reason }), system: SYSTEM, model: job.model, dataDir: this.dataDir });
+        const prompt = buildArrangePrompt({ canvas: job.canvas, scripts: before, ask: job.ask, retry: reason, drops, skipped });
+        answer = await this.run({ prompt, images, system: SYSTEM, model: job.model, dataDir: this.dataDir });
       } catch (e) {
         if (e instanceof ClaudeError && ['not-logged-in', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) return this.finish(job, 'failed', e.message);
         reason = e.message;
@@ -198,6 +206,21 @@ export class Arranger {
     }
     this.log(`Could not arrange ${job.canvas}: ${reason}`);
     return this.finish(job, 'failed', `The agent could not do it: ${reason}`);
+  }
+
+  /* The drops on the canvas, described, with their images to look at. */
+  dropsOn(canvas) {
+    const bronze = this.writer.agent.bronze;
+    const seen = new Set(), list = [];
+    for (const { id } of this.writer.agent.placedDrops(canvas)) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      try { list.push({ drop: bronze.get(id), file: bronze.file(id) }); } catch (e) { if (!(e instanceof BronzeError)) throw e; }
+    }
+    const { images, skipped } = dropImages(list.map((x) => x.drop), (id) => bronze.file(id));
+    const shown = new Set(images.map((im) => im.id));
+    const drops = list.map(({ drop, file }) => describeDrop(drop, file, this.dataDir, { shown, wordsMax: DROP_WORDS })).join('\n\n');
+    return { drops, images, skipped };
   }
 
   async stop() { if (this.running) await this.running.done.catch(() => {}); }
