@@ -86,7 +86,7 @@ test('an answer that loses something is asked for again with the reason', async 
   const r = await asked(s, 'flatten the bugs');
   assert.equal(r.status, 'done');
   assert.equal(r.model, 'sonnet');
-  assert.match(s.asked[1].prompt, /Your last answer was not taken: it lost the note "- \[ \] figures missed"/);
+  assert.match(s.asked[1].prompt, /Your last answer's scripts were not taken: it lost the note "- \[ \] figures missed"/);
   assert.equal(s.script('Bugs'), kept);
 });
 
@@ -97,7 +97,7 @@ test('scripts that do not all draw are taken none of them, and two refusals fail
   s.answers.push(fence(bugs, ideas), fence(bugs, ideas));
   const r = await asked(s, 'move figures');
   assert.equal(r.status, 'failed');
-  assert.match(r.detail, /The agent could not do it: .*no file at C:\/nowhere\/x\.pdf/);
+  assert.match(r.detail, /The canvas was not changed: .*no file at C:\/nowhere\/x\.pdf/);
   assert.equal(s.script('Bugs'), BUGS, 'Bugs kept its old script, since Ideas could not be drawn');
   assert.equal(s.script('Ideas'), IDEAS);
 });
@@ -139,4 +139,29 @@ test('an ask shows what each drop on the canvas is and attaches its images (t-1b
   assert.deepEqual(images.map((im) => im.label), [`The image of drop ${img.id} (lap.png):`]);
   assert.ok(prompt.includes('Forza 6, Spa') && prompt.includes('tune the gearbox before Spa'));
   assert.match(prompt, new RegExp(`the image itself is attached above, labelled "drop ${img.id}"`));
+});
+
+test('a chat turn answers in words, changes the canvas only when asked, and every turn is logged (t-2ffa1ff1de, t-e49cda284a)', async (t) => {
+  const s = await setup(t);
+  s.answers.push('You have two totems: Bugs, with two open bugs, and Ideas, with one idea.');
+  const q = await asked(s, 'what is on this canvas?');
+  assert.equal(q.status, 'answered');
+  assert.equal(q.reply, 'You have two totems: Bugs, with two open bugs, and Ideas, with one idea.');
+  assert.equal(s.script('Bugs'), BUGS, 'a question changes nothing');
+
+  const flat = '<Canvas name="Board"><Totem name="Bugs"><Note name="Ingest">- [ ] slow ingest</Note><Note name="Figures">- [ ] figures missed</Note></Totem></Canvas>';
+  s.answers.push(`Done - the two bugs now sit straight in the totem.\n\`\`\`xml\n${flat}\n\`\`\``);
+  s.arranger.ask('Board', 'take them out of the Open box', null, { source: 'canvasx' });
+  await s.arranger.running.done;
+  const r = s.arranger.report('Board');
+  assert.deepEqual([r.status, r.reply, r.totems, r.source], ['done', 'Done - the two bugs now sit straight in the totem.', ['Bugs'], 'canvasx']);
+  assert.match(s.asked[1].prompt, /The conversation so far, oldest first:\nUser: what is on this canvas\?\nYou: You have two totems/);
+  assert.equal(s.script('Bugs'), flat);
+
+  const chat = s.writer.agent.chat('Board');
+  assert.deepEqual(chat.map((c) => [c.who, c.status || null, c.source || null]), [
+    ['user', null, 'notex'], ['agent', 'answered', null], ['user', null, 'canvasx'], ['agent', 'done', null],
+  ]);
+  assert.equal(chat[3].text, 'Done - the two bugs now sit straight in the totem.');
+  assert.deepEqual(chat[3].totems, ['Bugs']);
 });

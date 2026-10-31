@@ -225,3 +225,46 @@ test('the placer\'s model is switched from the page, and an ask is refused befor
   assert.match((await call('POST', '/api/agent-canvases/Notes/ask', { body: { ask: 'tidy', model: 'haiku' } })).body.error.message, /not assigned to the agent/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).arranger, undefined, 'a refused ask keeps no model');
 });
+
+test('CanvasX\'s link: written into the workspace, opening only an agent canvas\'s chat, from CanvasX\'s page (t-76dff4fffe)', async () => {
+  const link = JSON.parse(fs.readFileSync(path.join(workspace, '.notex', 'link.json'), 'utf8'));
+  assert.equal(link.url, s.url);
+  assert.equal(link.token, s.linkToken);
+  const viaLink = (method, p, { body, origin } = {}) => fetch(s.url + p, {
+    method,
+    headers: { 'x-notex-link': link.token, ...(origin ? { origin } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const chat = await viaLink('GET', '/api/link/canvases/Harness', { origin: 'http://localhost:9075' });
+  assert.equal(chat.status, 200);
+  assert.equal(chat.headers.get('access-control-allow-origin'), 'http://localhost:9075');
+  const body = await chat.json();
+  assert.deepEqual([body.name, Array.isArray(body.chat), body.models], ['Harness', true, ['sonnet', 'opus', 'haiku']]);
+  // The link token opens nothing else, and CanvasX's page reaches nothing else.
+  assert.equal((await viaLink('GET', '/api/state')).status, 401);
+  assert.equal((await fetch(s.url + '/api/state', { headers: { 'x-notex-token': s.token, origin: 'http://localhost:9075' } })).status, 403);
+  assert.equal((await fetch(s.url + '/api/link/canvases/Harness', { headers: { 'x-notex-link': 'wrong' } })).status, 401);
+  assert.equal((await viaLink('GET', '/api/link/canvases/Notes')).status, 409);
+  assert.equal((await viaLink('GET', '/api/link/canvases/Nowhere')).status, 404);
+  // Refused before any model is asked.
+  assert.equal((await viaLink('POST', '/api/link/canvases/Harness/ask', { body: { ask: 'tidy', model: 'gpt' } })).status, 400);
+  assert.match((await (await viaLink('POST', '/api/link/canvases/Harness/ask', { body: { ask: ' ' } })).json()).error.message, /Write what the agent should do/);
+  const pre = await fetch(s.url + '/api/link/canvases/Harness/ask', { method: 'OPTIONS', headers: { origin: 'http://127.0.0.1:9075' } });
+  assert.match(pre.headers.get('access-control-allow-headers'), /X-Notex-Link/);
+});
+
+test('the link goes when the engine stops, and only the engine\'s own', async () => {
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'notex-link-'));
+  const ws2 = path.join(tmp2, 'ws');
+  fs.mkdirSync(path.join(ws2, 'A'), { recursive: true });
+  fs.writeFileSync(path.join(ws2, 'A', 'fabric.json'), '{}');
+  fs.mkdirSync(path.join(tmp2, 'data'));
+  fs.writeFileSync(path.join(tmp2, 'data', 'config.json'), JSON.stringify({ workspace: ws2, placing: false, ragx: path.join(tmp2, 'no-ragx') }));
+  const s2 = await startServer({ dataDir: path.join(tmp2, 'data'), port: 0, runtimeFile: path.join(tmp2, 'plugin', 'runtime.json'), log: () => {}, signals: false });
+  const file = path.join(ws2, '.notex', 'link.json');
+  assert.ok(fs.existsSync(file));
+  await s2.stop();
+  assert.ok(!fs.existsSync(file));
+  assert.ok(!fs.existsSync(path.dirname(file)), 'the empty .notex folder goes too');
+  fs.rmSync(tmp2, { recursive: true, force: true });
+});

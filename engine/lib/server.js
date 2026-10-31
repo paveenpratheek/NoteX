@@ -48,6 +48,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
 export const DEFAULT_PORT = 7781;
 export const DEFAULT_ORIGINS = ['http://127.0.0.1:7070', 'http://localhost:7070'];
+// CanvasX's own page, which talks to the agent through the link (t-76dff4fffe).
+export const CANVASX_ORIGINS = ['http://localhost:9075', 'http://127.0.0.1:9075'];
+export const LINK_FILE = path.join('.notex', 'link.json');
 export const DEFAULT_RUNTIME = path.join(HERE, '..', '..', 'plugin', 'runtime.json');
 const MAX_JSON = 64 * 1024;
 const MAX_SCRIPT_JSON = 256 * 1024; // a script may be 100 KB, escaped once more as JSON
@@ -199,6 +202,26 @@ export async function startServer({
   let stopping = false;
   let actualPort = port;
   const token = crypto.randomBytes(24).toString('base64url');
+  /* CanvasX's way in: a second token, written with the engine's address into
+   * the workspace CanvasX already has open, that opens only /api/link/ -
+   * an agent canvas's chat and sending it a message (t-76dff4fffe). */
+  const linkToken = crypto.randomBytes(24).toString('base64url');
+  const canvasxOrigins = () => (Array.isArray(config.canvasxOrigins) ? config.canvasxOrigins : CANVASX_ORIGINS);
+  const linkFile = (ws = config.workspace) => (ws ? path.join(ws, LINK_FILE) : null);
+  const writeLink = () => {
+    const f = linkFile();
+    if (!f || !fs.existsSync(config.workspace)) return;
+    try {
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, JSON.stringify({ url: `http://127.0.0.1:${actualPort}`, token: linkToken, pid: process.pid, startedAt: new Date().toISOString() }, null, 2));
+    } catch (e) { log(`Could not write ${f} for CanvasX: ${e.message}`); }
+  };
+  // Only our own link is removed: another engine may have written it since.
+  const removeLink = (ws = config.workspace) => {
+    const f = linkFile(ws);
+    try { if (f && JSON.parse(fs.readFileSync(f, 'utf8')).token === linkToken) fs.rmSync(f); } catch (_) { /* none, or another's */ }
+    try { if (f) fs.rmdirSync(path.dirname(f)); } catch (_) { /* not empty, or gone */ }
+  };
   const allowedHosts = () => new Set([`127.0.0.1:${actualPort}`, `localhost:${actualPort}`]);
 
   const routes = async (req, res, url) => {
@@ -317,8 +340,10 @@ export async function startServer({
       const fabrics = listFabrics(ws);
       // Canvases switched on belong to the workspace they were switched on in.
       if (config.workspace && path.resolve(ws) !== config.workspace) { delete config.sync; delete config.rules; }
+      removeLink();
       config.workspace = path.resolve(ws);
       saveConfig();
+      writeLink();
       rules.tick();
       return json(200, { workspace: config.workspace, fabrics: fabrics.length });
     }
@@ -377,7 +402,7 @@ export async function startServer({
       const fdir = fabricDir(needWorkspace(), name);
       if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
       const mine = isAgentCanvas(fdir);
-      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name), ask: arranger.report(name), model: arranger.model(), models: MODELS });
+      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name), ask: arranger.report(name), chat: agent.chat(name, 100), model: arranger.model(), models: MODELS });
     }
     /* Ask the agent to arrange one of its canvases, in the user's words
      * (t-a9198c414f); the answer comes in the canvas's ask and activity. */
@@ -457,9 +482,35 @@ export async function startServer({
     throw new HttpError(404, 'no-route', `No ${req.method} ${url.pathname}.`);
   };
 
+  /* CanvasX's chat beside an agent canvas (t-2ffa1ff1de): only these, and
+   * only for a canvas assigned to the agent. */
+  const linkRoutes = async (req, res, url) => {
+    const json = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(body));
+    };
+    const r = /^\/api\/link\/canvases\/([^/]+)(\/ask)?$/.exec(url.pathname);
+    if (!r) throw new HttpError(404, 'no-route', `No ${req.method} ${url.pathname}.`);
+    const name = decodeURIComponent(r[1]);
+    const fdir = fabricDir(needWorkspace(), name);
+    if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
+    if (!isAgentCanvas(fdir)) throw new HttpError(409, 'not-agent', `${name} is not assigned to the agent.`);
+    if (req.method === 'GET' && !r[2]) return json(200, { name, chat: agent.chat(name, 100), ask: arranger.report(name), model: arranger.model(), models: MODELS });
+    if (req.method === 'POST' && r[2]) {
+      const { ask, model } = await readJson(req);
+      if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"}.');
+      if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
+      const job = arranger.ask(name, ask, model, { source: 'canvasx' });
+      if (model !== undefined) { config.arranger = { ...(config.arranger || {}), model }; saveConfig(); }
+      return json(202, { ask: job });
+    }
+    throw new HttpError(404, 'no-route', `No ${req.method} ${url.pathname}.`);
+  };
+
   const server = http.createServer(async (req, res) => {
     const origin = req.headers.origin;
-    const allowedOrigin = origin && origins.includes(origin) ? origin : null;
+    const isLink = String(req.url || '').startsWith('/api/link/');
+    const allowedOrigin = origin && (origins.includes(origin) || (isLink && canvasxOrigins().includes(origin))) ? origin : null;
     if (allowedOrigin) { res.setHeader('access-control-allow-origin', allowedOrigin); res.setHeader('vary', 'Origin'); }
     const refuse = (status, code, message) => {
       res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -470,17 +521,24 @@ export async function startServer({
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
-        'access-control-allow-headers': 'X-Notex-Token, Content-Type, X-Drop-Name, X-Drop-Note, X-Drop-Canvas',
+        'access-control-allow-headers': 'X-Notex-Token, X-Notex-Link, Content-Type, X-Drop-Name, X-Drop-Note, X-Drop-Canvas',
         'access-control-max-age': '600',
       });
       return res.end();
     }
-    const given = Buffer.from(String(req.headers['x-notex-token'] || ''));
-    const want = Buffer.from(token);
-    if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return refuse(401, 'bad-token', 'Missing or wrong X-Notex-Token.');
+    const same = (header, want) => {
+      const given = Buffer.from(String(req.headers[header] || ''));
+      return given.length === want.length && crypto.timingSafeEqual(given, want);
+    };
+    // The link token opens only the link routes; the engine's token, everything.
+    if (isLink ? !(same('x-notex-link', Buffer.from(linkToken)) || same('x-notex-token', Buffer.from(token))) : !same('x-notex-token', Buffer.from(token))) {
+      return isLink ? refuse(401, 'bad-link', 'Missing or wrong X-Notex-Link - NoteX may have restarted; read .notex/link.json again.') : refuse(401, 'bad-token', 'Missing or wrong X-Notex-Token.');
+    }
     if (stopping) return refuse(503, 'stopping', 'The engine is stopping.');
     try {
-      await routes(req, res, new URL(req.url, `http://${req.headers.host}`));
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (isLink) return await linkRoutes(req, res, url);
+      await routes(req, res, url);
     } catch (e) {
       if (res.headersSent) { try { res.end(); } catch (_) {} return; }
       refuse(statusOf(e), e.code || 'failed', e.message);
@@ -495,6 +553,7 @@ export async function startServer({
   actualPort = server.address().port;
   const url = `http://127.0.0.1:${actualPort}`;
   const removeRuntime = writeRuntime(runtimeFile, { url, port: actualPort, token, pid: process.pid, dataDir: dir, version: VERSION, startedAt: new Date().toISOString() });
+  writeLink();
   writeLocal(path.join(path.dirname(runtimeFile), 'local.json'));
   sync.start();
   rules.start();
@@ -517,6 +576,7 @@ export async function startServer({
       await new Promise((r) => server.close(r));
       server.closeAllConnections?.();
       removeRuntime();
+      removeLink();
       log('Stopped.');
     })();
     return stopped;
@@ -527,5 +587,5 @@ export async function startServer({
     for (const s of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(s, onSignal);
   }
 
-  return { url, port: actualPort, token, dataDir: dir, stop, runtimeFile, sync, rules, writer, config: () => ({ ...config }) };
+  return { url, port: actualPort, token, linkToken, dataDir: dir, stop, runtimeFile, sync, rules, writer, config: () => ({ ...config }) };
 }

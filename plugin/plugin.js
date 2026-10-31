@@ -738,9 +738,9 @@ async function openAgentCanvas(name) {
     const say = a.what === 'script' ? `${a.change} from ${a.owner}: ${a.status === 'written' ? 'kept' : a.status}${a.message ? ` - ${a.message}` : ''}`
       : a.what === 'render' ? `Drawn - ${a.totems.join(', ') || 'no totems'}${a.placed && a.placed.length ? ` · placed ${a.placed.length}` : ''}`
         : a.what === 'asked' ? `Asked (${MODEL_LABEL[a.model] || a.model}): ${a.ask}`
-          : a.what === 'answered' ? (a.status === 'done' ? `Arranged as asked - ${a.totems.join(', ')}` : a.detail || 'Could not arrange it')
+          : a.what === 'answered' ? (a.status === 'done' ? `Arranged as asked - ${a.totems.join(', ')}` : a.status === 'answered' ? 'Answered in the chat' : a.detail || 'Could not arrange it')
             : a.what === 'forgot' ? `Forgot drop ${a.drop}` : a.what === 'assigned' ? 'Assigned to the agent' : a.what === 'taken back' ? 'Taken back from the agent' : a.what;
-    const li = el('li', a.status && !['written', 'done'].includes(a.status) ? 'bad' : null);
+    const li = el('li', a.status && !['written', 'done', 'answered'].includes(a.status) ? 'bad' : null);
     li.append(el('span', 'when', ago(a.at)), el('span', null, say));
     act.append(li);
   }
@@ -772,11 +772,29 @@ function renderAsk(name, c) {
   line.hidden = !a;
   line.classList.toggle('bad', Boolean(a && a.status === 'failed'));
   if (a) {
-    line.textContent = working ? `The agent (${MODEL_LABEL[a.model] || a.model}) is working on "${a.ask}"…`
-      : a.status === 'done' ? `Done ${ago(a.doneAt)}: rewrote ${a.totems.join(', ')}.` : a.detail || 'The agent could not do it.';
+    line.textContent = working ? `The agent (${MODEL_LABEL[a.model] || a.model}) is thinking…`
+      : a.status === 'done' ? `Changed ${ago(a.doneAt)}: ${a.totems.join(', ')}.` : a.status === 'failed' ? a.detail || 'The agent could not do it.' : '';
+    line.hidden = !line.textContent;
   }
+  renderChat($('ask-chat'), c.chat || []);
   clearTimeout(renderAsk.timer);
   if (working) renderAsk.timer = setTimeout(() => { if (S.tab === 'agents' && S.agentCanvas === name) openAgentCanvas(name); }, 3000);
+}
+
+/* The conversation NoteX keeps for the canvas - from here or from CanvasX's
+ * chat beside the canvas (t-2ffa1ff1de). */
+function renderChat(ul, chat) {
+  const atEnd = ul.scrollHeight - ul.scrollTop - ul.clientHeight < 40;
+  ul.replaceChildren();
+  ul.hidden = !chat.length;
+  for (const t of chat) {
+    const li = el('li', `${t.who === 'user' ? 'user' : 'agent'}${t.status === 'failed' ? ' bad' : ''}`);
+    const who = t.who === 'user' ? `You${t.source === 'canvasx' ? ', in CanvasX' : ''}` : `Agent (${MODEL_LABEL[t.model] || t.model})${t.totems && t.totems.length ? ` · changed ${t.totems.join(', ')}` : ''}`;
+    li.append(el('span', 'who', `${who} · ${ago(t.at)}`), document.createTextNode(t.text || ''));
+    ul.append(li);
+  }
+  if (atEnd || ul.dataset.count !== String(chat.length)) ul.scrollTop = ul.scrollHeight;
+  ul.dataset.count = String(chat.length);
 }
 
 async function askAgent() {

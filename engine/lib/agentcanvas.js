@@ -110,6 +110,22 @@ export class AgentCanvases {
     return lines.slice(-n).reverse().map((l) => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
   }
 
+  /* The conversation with the agent about the canvas, from CanvasX's chat
+   * or NoteX's page: kept whole, oldest first (t-2ffa1ff1de). */
+  say(canvas, turn) {
+    const file = path.join(this.dir(canvas), 'chat.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const entry = { at: new Date(this.now()).toISOString(), ...turn };
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n');
+    return entry;
+  }
+
+  chat(canvas, n = 100) {
+    let lines = [];
+    try { lines = fs.readFileSync(path.join(this.dir(canvas), 'chat.jsonl'), 'utf8').split('\n').filter(Boolean); } catch (_) { /* none yet */ }
+    return lines.slice(-n).map((l) => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
+  }
+
   lastRender(canvas) {
     try { return JSON.parse(fs.readFileSync(path.join(this.dir(canvas), 'last-render.json'), 'utf8')); } catch (_) { return null; }
   }
