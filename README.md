@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-140%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-143%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -87,6 +87,7 @@ Later scripts can change the agent's own work:
 |---|---|
 | `<Canvas>` | the canvas to write on; created if it doesn't exist |
 | `<Totem>` | a named group, the agent's own; one per script |
+| `<SubTotem>` | a named group inside a totem, one level only (a book's chapter, a game's car); laid out side by side under the totem's own content, its places read `Book (totem) > Chapter 1 (sub-totem) > ...` |
 | `<Area>` | a box that holds other items |
 | `<Note>` | a note card, with `- [ ]` checklists; `drop="d-..."` takes its words from the Inbox |
 | `<Text>` | free text |
@@ -153,7 +154,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 140, all passing, in ~3,050 lines |
+| Tests | 143, all passing, in ~3,100 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 

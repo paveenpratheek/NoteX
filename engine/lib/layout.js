@@ -26,6 +26,11 @@ import { M, measureText, measureNote, fileSize, imageSize, imageShown, isImageNa
 import { checkCanvas, overlapsOf } from './check.js';
 
 export const FREE = 800;
+/* Sub-totems sit side by side under their totem's own content, each with
+ * its marker above what it holds, this far from each other and from the
+ * totem's content and marker: beyond CanvasX's 500 field and 300 chain, so
+ * nearness gives every box to its own sub-totem (t-5f45cfc21a). */
+export const SUB_GAP = 600;
 
 export class Refusal extends Error {
   constructor(message, node = null) {
@@ -284,8 +289,24 @@ function measure(node, ctx) {
       node.size = { w: sizes.reduce((s, z) => s + z.w, 0) + M.ROW_GAP * Math.max(0, sizes.length - 1), h: Math.max(0, ...sizes.map((z) => z.h)) };
       break;
     }
-    case 'Area': case 'Page': case 'Column': case 'Totem': case 'Add': {
-      const gap = node.tag === 'Totem' ? M.TOTEM_GAP : M.GAP;
+    case 'Totem': case 'SubTotem': {
+      const own = content.filter((c) => c.tag !== 'SubTotem');
+      const subs = content.filter((c) => c.tag === 'SubTotem');
+      const sizes = own.map((c) => measure(c, ctx));
+      const ownSize = { w: Math.max(0, ...sizes.map((z) => z.w)), h: sizes.reduce((s, z) => s + z.h, 0) + M.TOTEM_GAP * Math.max(0, sizes.length - 1) };
+      const subSizes = subs.map((c) => measure(c, ctx));
+      const row = { w: subSizes.reduce((s, z) => s + z.w, 0) + SUB_GAP * Math.max(0, subSizes.length - 1), h: Math.max(0, ...subSizes.map((z) => z.h)) };
+      // Sub-totems start SUB_GAP below the totem's content, or below its marker when it holds none.
+      node.subsAt = subs.length ? (own.length ? ownSize.h + SUB_GAP : SUB_GAP - M.TOTEM_ABOVE) : 0;
+      const inner = { w: Math.max(ownSize.w, row.w), h: subs.length ? node.subsAt + row.h : ownSize.h };
+      node.inner = inner;
+      // The marker goes over the totem's own content when it has some, so that content is in its field.
+      node.markW = own.length ? ownSize.w : inner.w;
+      node.size = node.tag === 'SubTotem' ? { w: Math.max(inner.w, 1), h: M.TOTEM_ABOVE + inner.h } : inner;
+      break;
+    }
+    case 'Area': case 'Page': case 'Column': case 'Add': {
+      const gap = M.GAP;
       const sizes = content.map((c) => measure(c, ctx));
       const inner = { w: Math.max(0, ...sizes.map((z) => z.w)), h: sizes.reduce((s, z) => s + z.h, 0) + gap * Math.max(0, sizes.length - 1) };
       node.inner = inner;
@@ -310,8 +331,15 @@ function place(node, x, y) {
   if (node.tag === 'Row') {
     let cx = x;
     for (const c of content) { place(c, cx, y); cx += c.size.w + M.ROW_GAP; }
-  } else if (['Column', 'Totem', 'Add', 'Page'].includes(node.tag)) {
-    const gap = node.tag === 'Totem' ? M.TOTEM_GAP : M.GAP;
+  } else if (node.tag === 'Totem' || node.tag === 'SubTotem') {
+    // A sub-totem's marker is at its top; what it holds starts below it.
+    const top = node.tag === 'SubTotem' ? y + M.TOTEM_ABOVE : y;
+    let cy = top;
+    for (const c of content.filter((k) => k.tag !== 'SubTotem')) { place(c, x, cy); cy += c.size.h + M.TOTEM_GAP; }
+    let cx = x;
+    for (const c of content.filter((k) => k.tag === 'SubTotem')) { place(c, cx, top + node.subsAt); cx += c.size.w + SUB_GAP; }
+  } else if (['Column', 'Add', 'Page'].includes(node.tag)) {
+    const gap = M.GAP;
     let cy = y;
     for (const c of content) { place(c, x, cy); cy += c.size.h + gap; }
   } else if (node.tag === 'Area') {
@@ -382,6 +410,18 @@ function emit(node, ctx, out) {
       if (holderArea && Array.isArray(holderArea.containedFiles)) holderArea.containedFiles.push(id);
       if (f.copy) out.copies.push(f.copy);
       out.written.push(id);
+      return;
+    }
+    case 'SubTotem': {
+      // A totem of its own on the canvas, named to its totem by parentTotemId (t-64e1acbf09).
+      const id = opts.newId();
+      const parent = state.totems.find((t) => t.id === ctx.totemId);
+      state.totems.push({ id, name: node.attrs.name, parentTotemId: ctx.totemId, color: (parent && parent.color) || '#3b5a76', radius: 0, x: Math.round(x + Math.max(node.markW || node.size.w, 1) / 2), y, isLocked: false, owner: opts.owner, writtenBy: 'agent' });
+      node.id = id;
+      out.written.push(id);
+      const labels = [...ctx.labels, `${node.attrs.name} (sub-totem)`];
+      out.boxes.push({ id: `totem:${id}`, address: labels.join(' > ') });
+      for (const c of node.children) if (c.tag !== 'Line' && c.tag !== 'Link') emit(c, { ...ctx, totemId: id, chain: [...ctx.chain, `totem:${id}`], labels }, out);
       return;
     }
     case 'Row': case 'Column': case 'Totem': case 'Add': case 'Page':
@@ -517,7 +557,7 @@ export function layoutTotem(parsed, state, opts) {
   const y = all ? all.minY + M.TOTEM_ABOVE : 0;
   place(parsed.totem, x, y);
   const totemId = ctx.opts.newId();
-  state.totems.push({ id: totemId, name, color: '#3b5a76', radius: 0, x: Math.round(x + Math.max(size.w, 1) / 2), y: y - M.TOTEM_ABOVE, isLocked: false, owner: opts.owner, writtenBy: 'agent' });
+  state.totems.push({ id: totemId, name, color: '#3b5a76', radius: 0, x: Math.round(x + Math.max(parsed.totem.markW || size.w, 1) / 2), y: y - M.TOTEM_ABOVE, isLocked: false, owner: opts.owner, writtenBy: 'agent' });
   const out = output();
   out.totemId = totemId;
   out.written.push(totemId);

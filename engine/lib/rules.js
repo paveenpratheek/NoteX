@@ -53,7 +53,10 @@ export function magneticTotems(state) {
   const items = [...(state.areas || []), ...(state.drawings || []), ...(state.files || [])];
   const datas = items.map((item) => ({ item, bbox: itemBBox(item), totem: null })).filter((d) => d.bbox !== null);
   const queue = [];
-  for (const totem of state.totems || []) {
+  // Sub-totems claim first, as in CanvasX (CanvasX t-9b101d1e08).
+  const totems = state.totems || [];
+  const isSub = (t) => Boolean(t.parentTotemId && totems.some((p) => p.id === t.parentTotemId && !p.parentTotemId));
+  for (const totem of [...totems.filter(isSub), ...totems.filter((t) => !isSub(t))]) {
     for (const d of datas) {
       if (d.totem) continue;
       if (distToBBox(totem.x, totem.y, d.bbox) <= FIELD) { d.totem = totem; queue.push(d); }

@@ -21,6 +21,8 @@ export const FORMAT = [
   'Tags: <Totem name>, <Area name> (a box), <Note name> (a note; a checklist is "- [ ] item" lines), <Text size?> (words; size 10-72 px, default 18),',
   '<File path> (a full path on this machine, copied onto the canvas, or a file name already on it), <ScrollBox name> holding <Page>s,',
   '<Row> (side by side, tops aligned), <Column> (stacked, inside a Row).',
+  '<SubTotem name> goes straight inside <Totem>, one level only: a group of its own under the totem, such as the chapters of a book or the cars of a game, holding boxes as a totem does.',
+  'NoteX lays out the totem\'s own content first and its sub-totems side by side below it; their places read "Book (totem) > Chapter 1 (sub-totem) > ...".',
   'To connect two boxes, use <Link from to>: File Fabric\'s link between the boxes\' corner dots (such as bottom-left to top-left), which is what a connection is on a canvas.',
   '<Line from to> only draws a line between two boxes with File Fabric\'s Line tool - a drawing, not a connection; use it only when the user asks for a drawn line.',
   'Both name their boxes by name, by a path such as "Collect > Todo" when two share a name, or in an <Add> by a full address.',

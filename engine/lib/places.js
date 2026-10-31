@@ -79,7 +79,12 @@ export function buildPlaces(fabric) {
   const root = add({ id: 'fabric', kind: 'fabric', name: fabric.name, parent: null });
   let canvas = null;
   const canvasPlace = () => canvas || (canvas = add({ id: 'canvas', kind: 'canvas', name: 'Open canvas', parent: root.id }));
-  for (const t of state.totems || []) add({ id: `totem:${t.id}`, kind: 'totem', name: t.name, parent: root.id, totem: t, bbox: itemBBox(t) });
+  // A sub-totem hangs from its totem, one level deep (t-64e1acbf09).
+  const totemIds = new Set((state.totems || []).filter((t) => !t.parentTotemId).map((t) => t.id));
+  for (const t of state.totems || []) {
+    const sub = Boolean(t.parentTotemId && totemIds.has(t.parentTotemId));
+    add({ id: `totem:${t.id}`, kind: sub ? 'subtotem' : 'totem', name: t.name, parent: sub ? `totem:${t.parentTotemId}` : root.id, totem: t, bbox: itemBBox(t) });
+  }
 
   /* A scroll box's page as a place, numbered by its position: pages have
    * only an id (t-99b50f0667). null when the page was deleted - File Fabric
@@ -190,11 +195,11 @@ export function buildPlaces(fabric) {
 
   /* Labels and addresses, from the top down. Siblings with one name get
    * [2], [3] so every address names one place (t-7ca4b882b0). */
-  const SUFFIX = { totem: ' (totem)', note: ' (note)', scroll: ' (scroll box)' };
+  const SUFFIX = { totem: ' (totem)', subtotem: ' (sub-totem)', note: ' (note)', scroll: ' (scroll box)' };
   const labelBase = (p) => {
     const name = String(p.name || '').replace(/\s+/g, ' ').trim();
     if (p.kind === 'page' || p.kind === 'canvas') return name;
-    const fallback = p.kind === 'note' ? 'Untitled' : p.kind === 'totem' ? 'Unnamed' : 'Unnamed area';
+    const fallback = p.kind === 'note' ? 'Untitled' : p.kind === 'totem' || p.kind === 'subtotem' ? 'Unnamed' : 'Unnamed area';
     return (name || fallback) + (SUFFIX[p.kind] || '');
   };
   const walk = (p, parts) => {

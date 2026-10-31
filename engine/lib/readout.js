@@ -14,7 +14,7 @@ import { escapeText, escapeAttr } from './script.js';
 import { visualBox } from './measure.js';
 import { fingerprint } from './writer.js';
 
-const TAG = { totem: 'Totem', area: 'Area', note: 'Note', scroll: 'ScrollBox', page: 'Page' };
+const TAG = { totem: 'Totem', subtotem: 'SubTotem', area: 'Area', note: 'Note', scroll: 'ScrollBox', page: 'Page' };
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
 /* A canvas, or with at one place in it, as a script. ledger, when given,
@@ -75,7 +75,7 @@ export function readOut(fabric, { at = null, ledger = null } = {}) {
     const tag = TAG[p.kind];
     const attrs = [];
     if (p.kind !== 'page') attrs.push(`name="${escapeAttr(p.name || '')}"`);
-    attrs.push(`id="${escapeAttr(p.kind === 'totem' ? p.totem.id : p.kind === 'page' ? p.id.split(':')[2] : p.id)}"`);
+    attrs.push(`id="${escapeAttr(p.kind === 'totem' || p.kind === 'subtotem' ? p.totem.id : p.kind === 'page' ? p.id.split(':')[2] : p.id)}"`);
     if (p.kind === 'totem') attrs.push(`owner="${escapeAttr(ownerOf(p))}"`);
     const own = p.area ? marks(p.area, p) : '';
     const open = `${pad(d)}<${tag} ${attrs.join(' ')}${own}`;

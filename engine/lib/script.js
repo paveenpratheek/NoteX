@@ -43,6 +43,8 @@ const TAGS = {
   // Takes an agent's own item off the canvas, with what is inside it (t-1ca15af044, t-5d426facf3).
   Remove: { attrs: { id: true }, holds: 'nothing' },
   Totem: { attrs: { name: true }, holds: 'tags' },
+  // One level under a totem: a book's chapters, a game's cars (t-64e1acbf09).
+  SubTotem: { attrs: { name: true }, holds: 'tags' },
   Area: { attrs: { name: true }, holds: 'tags' },
   // drop="d-..." names something the user dropped in the Inbox, placed from bronze (t-2fa309e6c8).
   Note: { attrs: { name: true, drop: false }, holds: 'text' },
@@ -63,7 +65,8 @@ const INSIDE = {
   '': ['Canvas', 'Add'],
   Canvas: ['Totem', 'Edit', 'Remove'],
   Add: [...CONTENT, ...WIRES],
-  Totem: [...CONTENT, ...WIRES],
+  Totem: [...CONTENT, ...WIRES, 'SubTotem'],
+  SubTotem: [...CONTENT, ...WIRES],
   Area: [...CONTENT, ...WIRES],
   Page: [...CONTENT, ...WIRES],
   Row: CONTENT,
@@ -283,6 +286,14 @@ function collectBoxes(top) {
         visit(c, c.path, new Map());
       } else if (c.tag === 'Page') {
         visit(c, path, new Map());
+      } else if (c.tag === 'SubTotem') {
+        // A sub-totem is a place of its own: its boxes are named under it.
+        const name = c.attrs.name;
+        const key = `sub-totem:${name.toLowerCase()}`;
+        const prev = siblings.get(key);
+        if (prev) throw new ScriptError(`two sub-totems here are both called "${name}" (the other is on line ${prev.line}) - give each its own name.`, c.line, c.col);
+        siblings.set(key, c);
+        visit(c, [...path, name], new Map());
       } else if (c.tag === 'Row' || c.tag === 'Column') {
         visit(c, path, siblings);
       }

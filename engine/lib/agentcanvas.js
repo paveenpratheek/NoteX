@@ -48,6 +48,7 @@ export function dropAddresses(parsed) {
     let page = 0;
     for (const c of node.children || []) {
       if (c.tag === 'Page') { visit(c, [...labels, `Page ${++page}`]); continue; }
+      if (c.tag === 'SubTotem') { visit(c, [...labels, `${c.attrs.name} (sub-totem)`]); continue; }
       const here = ['Area', 'Note', 'ScrollBox'].includes(c.tag) ? [...labels, c.attrs.name + (LABEL[c.tag] || '')] : labels;
       if (c.attrs && c.attrs.drop) out.push({ id: c.attrs.drop, address: (c.tag === 'Note' ? here : labels).join(' > ') });
       visit(c, here);

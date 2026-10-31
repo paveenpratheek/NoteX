@@ -221,3 +221,61 @@ test('an empty totem - just its marker - is kept clear too, and a canvas spaced 
   assert.ok(s.reach.Screenshots.minX - s.reach['Forza 6'].maxX >= TOTEM_GAP - 1);
   assert.deepEqual(s.wrong, []);
 });
+
+/* ------------------------------------------------------------ sub-totems */
+
+const BOOK = '<Note name="Intro">What the book is about</Note>'
+  + '<SubTotem name="Chapter 1"><Area name="Notes"><Note name="Key idea">first idea</Note></Area></SubTotem>'
+  + '<SubTotem name="Chapter 2"><Area name="Notes"><Note name="Key idea">second idea</Note></Area><Text>Read twice.</Text></SubTotem>';
+
+test('<SubTotem> goes straight inside <Totem>, one level, with names of its own (t-64e1acbf09)', () => {
+  const p = parseScript(totem('Book', BOOK));
+  assert.deepEqual(p.totem.children.map((c) => c.tag), ['Note', 'SubTotem', 'SubTotem']);
+  // Boxes are named under their sub-totem, so two chapters may both hold "Notes".
+  assert.deepEqual(p.boxes.map((b) => b.path.join(' > ')).filter((x) => x.endsWith('Notes')), ['Chapter 1 > Notes', 'Chapter 2 > Notes']);
+  assert.throws(() => parseScript(totem('Book', '<Area name="A"><SubTotem name="X"><Text>x</Text></SubTotem></Area>')), /cannot go inside <Area>|<SubTotem>/);
+  assert.throws(() => parseScript(totem('Book', '<SubTotem name="X"><SubTotem name="Y"><Text>y</Text></SubTotem></SubTotem>')), /<SubTotem>/);
+  assert.throws(() => parseScript(totem('Book', '<SubTotem name="X"><Text>a</Text></SubTotem><SubTotem name="x"><Text>b</Text></SubTotem>')), /two sub-totems here are both called "x"/);
+});
+
+test('a totem with sub-totems is drawn with each sub-totem\'s marker over its own boxes, and CanvasX\'s grouping agrees (t-5f45cfc21a)', async (t) => {
+  const { writer, board, places } = setup(t);
+  const { magneticTotems } = await import('../engine/lib/rules.js');
+  const { readOut } = await import('../engine/lib/readout.js');
+  const { dropAddresses } = await import('../engine/lib/agentcanvas.js');
+  const e = await writer.submit({ script: totem('Book', BOOK), owner: 'claude' });
+  assert.equal(e.status, 'written', JSON.stringify(e.result));
+  const fabric = readFabric(board);
+  const st = fabric.state;
+  const book = st.totems.find((x) => x.name === 'Book');
+  const subs = st.totems.filter((x) => x.parentTotemId === book.id).map((x) => x.name);
+  assert.deepEqual(subs, ['Chapter 1', 'Chapter 2']);
+  const all = places();
+  assert.ok(all.includes('Book (totem) > Intro (note)'));
+  assert.ok(all.includes('Book (totem) > Chapter 1 (sub-totem) > Notes > Key idea (note)'));
+  assert.ok(all.includes('Book (totem) > Chapter 2 (sub-totem) > Notes > Key idea (note)'));
+  // CanvasX, grouping by nearness, gives every box to the totem or sub-totem NoteX drew it for.
+  const groups = magneticTotems(st);
+  const wrong = [...st.areas, ...st.drawings].filter((item) => item.linkedTotemId && (groups.get(item) || {}).id !== item.linkedTotemId).map((item) => item.name || item.id);
+  assert.deepEqual(wrong, [], 'every box is claimed, and by its own totem or sub-totem');
+  const ch1 = st.totems.find((x) => x.name === 'Chapter 1');
+  assert.ok(st.areas.some((a) => a.linkedTotemId === ch1.id && a.name === 'Notes'));
+  // notex_read reads it back as written.
+  const out = readOut(fabric);
+  assert.match(out, /<Totem name="Book"[^>]*>[\s\S]*<SubTotem name="Chapter 1"[\s\S]*<SubTotem name="Chapter 2"/);
+  assert.deepEqual(dropAddresses(parseScript(totem('Book', '<SubTotem name="Cars"><Area name="GTR"><File drop="d-0123456789"/></Area></SubTotem>'))), [{ id: 'd-0123456789', address: 'Book (totem) > Cars (sub-totem) > GTR' }]);
+});
+
+test('a totem of sub-totems only keeps them clear of its own marker', async (t) => {
+  const { writer, board } = setup(t);
+  const { magneticTotems } = await import('../engine/lib/rules.js');
+  const { SUB_GAP } = await import('../engine/lib/layout.js');
+  const cars = '<SubTotem name="Nissan GTR"><Row><Area name="Front"><Text>f</Text></Area><Area name="Back"><Text>b</Text></Area><Area name="Side"><Text>s</Text></Area></Row></SubTotem>'
+    + '<SubTotem name="Ferrari 296"><Area name="Track"><Text>t</Text></Area></SubTotem>';
+  assert.equal((await writer.submit({ script: totem('Forza 6', cars), owner: 'claude' })).status, 'written');
+  const st = readFabric(board).state;
+  const top = st.totems.find((x) => !x.parentTotemId);
+  for (const s of st.totems.filter((x) => x.parentTotemId)) assert.ok(s.y - top.y >= SUB_GAP, `${s.name} is ${s.y - top.y} below the totem's marker`);
+  const groups = magneticTotems(st);
+  assert.deepEqual([...st.areas, ...st.drawings].filter((item) => item.linkedTotemId && (groups.get(item) || {}).id !== item.linkedTotemId).map((item) => item.name || item.id), []);
+});
