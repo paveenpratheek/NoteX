@@ -279,3 +279,56 @@ test('a totem of sub-totems only keeps them clear of its own marker', async (t) 
   const groups = magneticTotems(st);
   assert.deepEqual([...st.areas, ...st.drawings].filter((item) => item.linkedTotemId && (groups.get(item) || {}).id !== item.linkedTotemId).map((item) => item.name || item.id), []);
 });
+
+/* --------------------------------------------------------------- images */
+
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240"><rect width="400" height="240" fill="#4f46e5"/><text x="20" y="40" fill="#fff">Lap times</text></svg>';
+const chart = (svg = SVG, name = 'Lap times') => `<Image name="${name}"><![CDATA[${svg}]]></Image>`;
+
+test('an <Image> is one small SVG that runs nothing and links nowhere, sized by its viewBox (t-144620fead)', async () => {
+  const { svgProblem } = await import('../engine/lib/script.js');
+  const { svgSize } = await import('../engine/lib/measure.js');
+  assert.equal(svgProblem(SVG), null);
+  assert.equal(svgProblem('<?xml version="1.0"?>\n<svg width="10" height="10"><use href="#a"/></svg>'), null);
+  assert.match(svgProblem('<svg><script>alert(1)</script></svg>'), /<script>/);
+  assert.match(svgProblem('<svg onload="x()"></svg>'), /event handlers/);
+  assert.match(svgProblem('<svg><foreignObject/></svg>'), /foreignObject/);
+  assert.match(svgProblem('<svg><script/></svg>'), /<script>/);
+  assert.match(svgProblem('<svg><image href="https://example.com/a.png"/></svg>'), /nothing outside it/);
+  assert.match(svgProblem('<svg>' + 'x'.repeat(61_000) + '</svg>'), /60 KB/);
+  assert.match(svgProblem('just words'), /starting with <svg>/);
+  assert.throws(() => parseScript(totem('T', '<Image name="C"><svg></svg></Image>')), /holds its SVG inside <!\[CDATA\[/);
+  assert.deepEqual(svgSize(SVG), { w: 400, h: 240 });
+  assert.deepEqual(svgSize('<svg width="300" viewBox="0 0 600 200">'), { w: 300, h: 100 });
+  assert.equal(svgSize('<svg>'), null);
+});
+
+test('an agent\'s <Image> is saved as <name>.svg in sources and placed as an image; another drawing of that name gets a name of its own (t-1e8cdd344a)', async (t) => {
+  const { writer, board, agent } = setup(t);
+  const { readOut } = await import('../engine/lib/readout.js');
+  const e = await writer.submit({ script: totem('Laps', `<Area name="Spa">${chart()}</Area>`), owner: 'claude' });
+  assert.equal(e.status, 'written', JSON.stringify(e.result));
+  const file = path.join(board, 'sources', 'Lap times.svg');
+  assert.equal(fs.readFileSync(file, 'utf8'), SVG);
+  const img = readFabric(board).state.files.find((f) => f.name === 'Lap times.svg');
+  assert.equal(img.isImage, true);
+  assert.ok(Math.abs(img.imageWidth / img.imageHeight - 400 / 240) < 0.02, 'shown in its own proportions');
+  assert.match(readOut(readFabric(board)), /<File path="Lap times\.svg"/);
+  // Drawn again unchanged: the same file, no copy beside it.
+  agent.render('Board');
+  assert.deepEqual(fs.readdirSync(path.join(board, 'sources')), ['Lap times.svg']);
+  // A different drawing under the same name, in another totem, does not overwrite the first.
+  const other = SVG.replace('#4f46e5', '#16a34a');
+  assert.equal((await writer.submit({ script: totem('Laps 2', chart(other)), owner: 'claude' })).status, 'written');
+  const names = fs.readdirSync(path.join(board, 'sources')).sort();
+  assert.equal(names.length, 2);
+  assert.equal(fs.readFileSync(file, 'utf8'), SVG);
+  assert.ok(names.some((n) => /^Lap times \([0-9a-f]{8}\)\.svg$/.test(n)), names.join(', '));
+});
+
+test('an ask must keep an <Image> by name, and may redraw it', async () => {
+  const { checkArrangement } = await import('../engine/lib/arranger.js');
+  const before = [{ name: 'Laps', script: totem('Laps', chart()) }];
+  assert.equal(checkArrangement([totem('Laps', chart(SVG.replace('400', '500')))], 'Board', before).reason, undefined);
+  assert.match(checkArrangement([totem('Laps', '<Text>no picture</Text>')], 'Board', before).reason, /it lost the image "Lap times"/);
+});

@@ -61,6 +61,7 @@ export function contentKeys(parsed) {
       else if (c.tag === 'Note') keys.add(`the note ${here.join(' > ')} (${what(c.text)})`);
       else if (c.tag === 'Text') keys.add(`the text "${what(c.text)}"`);
       else if (c.tag === 'File') keys.add(`the file ${what(c.attrs.path)}`);
+      else if (c.tag === 'Image') keys.add(`the image "${c.attrs.name}"`);
       else if (c.tag === 'Link' || c.tag === 'Line') keys.add(`the ${c.tag} from ${c.attrs.from} to ${c.attrs.to}`);
       visit(c, ['Area', 'ScrollBox', 'Note'].includes(c.tag) ? here : at);
     }

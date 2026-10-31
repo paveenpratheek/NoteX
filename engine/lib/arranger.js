@@ -63,6 +63,8 @@ export function heldItems(parsed) {
       else if (c.tag === 'Note') out.push(`the note "${norm(c.text) ? String(c.text).trim() : a.name}"`);
       else if (c.tag === 'Text') out.push(`the text "${String(c.text || '').trim()}"`);
       else if (c.tag === 'File') out.push(`the file ${a.path}`);
+      // An image the agent drew is kept by its name; its SVG may be redrawn (t-1e8cdd344a).
+      else if (c.tag === 'Image') out.push(`the image "${a.name}"`);
       visit(c);
     }
   };
@@ -135,6 +137,7 @@ export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops =
     '- Keep everything the canvas holds - every note\'s words, every text, every file and every drop="..." - somewhere on the canvas, word for word. You may move it between boxes and totems, and make, rename, regroup or remove boxes.',
     '- Keep the names of the totems that are there: a totem cannot be deleted or renamed. To empty one, move what it holds into others and send it with what is left.',
     '- Keep each drop="d-..." on the same kind of tag it is on now.',
+    '- When the user asks for a picture - a diagram, a chart, a sketch - draw it as an <Image name="..."> holding one SVG in <![CDATA[ ... ]]>, and copy any <Image> already there exactly.',
     '- If the request asks for something you cannot do this way, do what you can and keep the rest as it is.',
     ...(retry ? ['', `Your last answer's scripts were not taken: ${retry} Answer again.`] : []),
     '',

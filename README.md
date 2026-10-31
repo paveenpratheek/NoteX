@@ -4,7 +4,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Node 24](https://img.shields.io/badge/node-%E2%89%A524-green)
-![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-147%20passing-brightgreen)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey)
 
 People plan on infinite canvases: boxes inside boxes, notes with checklists, files dropped next to the idea they belong to, and lines linking related things. That layout *is* information: what sits inside what, what is next to what, what is linked. A plain text export throws it away.
@@ -92,6 +92,7 @@ Later scripts can change the agent's own work:
 | `<Note>` | a note card, with `- [ ]` checklists; `drop="d-..."` takes its words from the Inbox |
 | `<Text>` | free text |
 | `<File>` | a file or image, copied into the canvas; `drop="d-..."` places a PDF, Word file or image from the Inbox |
+| `<Image>` | a picture the agent draws: one SVG inside `<![CDATA[ ... ]]>` (at most 60 KB, no scripts, handlers or outside links), saved as `<name>.svg` on the canvas and shown as an image. Ask the agent in the chat for a diagram or chart and it draws one |
 | `<Row>` / `<Column>` | side by side / stacked inside a row |
 | `<Link>` | joins two boxes corner to corner, as the app's own links do |
 | `<Line>` | draws a line only |
@@ -154,7 +155,7 @@ Later scripts can change the agent's own work:
 | | |
 |---|---|
 | Engine and page source | ~4,900 lines |
-| Tests | 144, all passing, in ~3,100 lines |
+| Tests | 147, all passing, in ~3,100 lines |
 | Runtime dependencies | 0 |
 | Commits | 22, each explaining *why* |
 

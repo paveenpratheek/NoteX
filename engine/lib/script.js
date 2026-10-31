@@ -50,6 +50,8 @@ const TAGS = {
   Note: { attrs: { name: true, drop: false }, holds: 'text' },
   Text: { attrs: { size: false, drop: false }, holds: 'text' },
   File: { attrs: { path: false, drop: false }, holds: 'nothing' },
+  // An image the agent drew, as SVG in CDATA; saved as <name>.svg on the canvas (t-1e8cdd344a).
+  Image: { attrs: { name: true }, holds: 'text' },
   Line: { attrs: { from: true, to: true }, holds: 'nothing' },
   Link: { attrs: { from: true, to: true }, holds: 'nothing' },
   Row: { attrs: {}, holds: 'tags' },
@@ -59,7 +61,22 @@ const TAGS = {
 };
 const BY_LOWER = new Map(Object.keys(TAGS).map((t) => [t.toLowerCase(), t]));
 
-const CONTENT = ['Area', 'Note', 'Text', 'File', 'Row', 'Column', 'ScrollBox'];
+const CONTENT = ['Area', 'Note', 'Text', 'File', 'Image', 'Row', 'Column', 'ScrollBox'];
+
+/* Why an agent's SVG cannot go on a canvas, or null: one <svg>, small,
+ * running nothing and reaching nothing outside itself (t-144620fead). */
+export const SVG_MAX = 60_000;
+export function svgProblem(svg) {
+  const s = String(svg || '').trim();
+  if (!/^(<\?xml[^>]*\?>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(s)) return 'an <Image> holds one SVG, starting with <svg>.';
+  if (!/<\/svg>$/i.test(s)) return 'the SVG must end with </svg>.';
+  if (Buffer.byteLength(s, 'utf8') > SVG_MAX) return `an <Image> can be at most ${SVG_MAX / 1000} KB of SVG - draw it more simply.`;
+  if (/<script[\s/>]/i.test(s)) return 'the SVG may not hold <script>.';
+  if (/<foreignObject[\s/>]/i.test(s)) return 'the SVG may not hold <foreignObject>.';
+  if (/\son[a-z]+\s*=/i.test(s)) return 'the SVG may not hold event handlers (on...="..." attributes).';
+  if (/\b(href|src)\s*=\s*["']\s*(?!#|data:image\/)/i.test(s)) return 'the SVG may link only to its own parts (href="#...") or to embedded data:image - nothing outside it.';
+  return null;
+}
 const WIRES = ['Line', 'Link'];
 const INSIDE = {
   '': ['Canvas', 'Add'],
@@ -193,6 +210,10 @@ function build(tokens) {
       stack.pop();
       continue;
     }
+    // An <Image>'s SVG is markup of its own, so it goes in as CDATA (t-1e8cdd344a).
+    if (parent.tag === 'Image' && !(t.type === 'close' && tag === 'Image')) {
+      throw new ScriptError('an <Image> holds its SVG inside <![CDATA[ ... ]]>, e.g. <Image name="Chart"><![CDATA[<svg ...>...</svg>]]></Image>.', t.line, t.col);
+    }
     if (!tag) {
       throw new ScriptError(`<${t.name}> is not a tag NoteX knows. The tags are ${Object.keys(TAGS).map((n) => `<${n}>`).join(', ')}.`, t.line, t.col);
     }
@@ -252,9 +273,13 @@ function finish(node) {
   if (drop !== undefined && !DROP_ID.test(drop)) throw new ScriptError(`drop="${drop}" is not a drop id - they look like d-0123456789; the Inbox lists them.`, node.line, node.col);
   if (spec.holds === 'text') {
     node.text = dedent(node.parts.join(''));
-    if (node.text.length > LIMITS.text) throw new ScriptError(`<${node.tag}> holds more than ${LIMITS.text} characters.`, node.line, node.col);
+    if (node.tag !== 'Image' && node.text.length > LIMITS.text) throw new ScriptError(`<${node.tag}> holds more than ${LIMITS.text} characters.`, node.line, node.col);
     if (drop !== undefined && node.text.trim()) throw new ScriptError(`<${node.tag} drop> takes its words from the drop - leave it empty, e.g. <${node.tag}${node.tag === 'Note' ? ' name="..."' : ''} drop="${drop}"/>.`, node.line, node.col);
     if (node.tag !== 'Edit' && drop === undefined && !node.text.trim()) throw new ScriptError(`<${node.tag}> is empty.`, node.line, node.col);
+  }
+  if (node.tag === 'Image') {
+    const why = svgProblem(node.text);
+    if (why) throw new ScriptError(why, node.line, node.col);
   }
   if (node.tag === 'File' && !node.attrs.path === (drop === undefined)) {
     throw new ScriptError(drop === undefined ? '<File> needs path="..." - or drop="d-..." for something in the Inbox.' : '<File> takes path or drop, not both.', node.line, node.col);

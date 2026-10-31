@@ -268,7 +268,8 @@ export class Writer {
     for (const c of out.copies || []) {
       const to = path.join(dir, 'sources', c.name);
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      if (!fs.existsSync(to)) fs.copyFileSync(c.from, to);
+      // A file the agent made (an <Image>'s SVG) comes as its bytes (t-1e8cdd344a).
+      if (!fs.existsSync(to)) { if (c.data) fs.writeFileSync(to, c.data); else fs.copyFileSync(c.from, to); }
     }
     const tmp = path.join(dir, 'fabric.json.notex-tmp');
     fs.writeFileSync(tmp, JSON.stringify(root));

@@ -82,15 +82,33 @@ const ext = (name) => String(name).split('.').pop().toLowerCase();
 export const isImageName = (name) => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext(name));
 export const isPdfName = (name) => ext(name) === 'pdf';
 
+/* An SVG's size from its <svg> tag: width and height in pixels, else its
+ * viewBox (t-1e8cdd344a). null when it gives neither. */
+export function svgSize(text) {
+  const tag = /<svg\b[^>]*>/i.exec(String(text || ''));
+  if (!tag) return null;
+  const num = (attr) => { const m = new RegExp(`\\s${attr}\\s*=\\s*["']\\s*([0-9.]+)\\s*(px)?\\s*["']`, 'i').exec(tag[0]); return m ? Number(m[1]) : null; };
+  let w = num('width'), h = num('height');
+  const vb = /\sviewBox\s*=\s*["']\s*[-0-9.]+[\s,]+[-0-9.]+[\s,]+([0-9.]+)[\s,]+([0-9.]+)\s*["']/i.exec(tag[0]);
+  if ((!w || !h) && vb) {
+    const vw = Number(vb[1]), vh = Number(vb[2]);
+    if (w && !h) h = (w * vh) / vw;
+    else if (h && !w) w = (h * vw) / vh;
+    else { w = vw; h = vh; }
+  }
+  return w && h ? { w: Math.round(w), h: Math.round(h) } : null;
+}
+
 /* An image's real width and height from its first bytes: PNG, JPEG, GIF,
- * WebP and BMP. null for anything else (SVG, ICO), which is then shown at
- * File Fabric's own 200 px square. */
+ * WebP and BMP, and an SVG's from its <svg> tag. null for anything else
+ * (ICO), which is then shown at File Fabric's own 200 px square. */
 export function imageSize(file) {
   let b;
   try {
     const fd = fs.openSync(file, 'r');
     try { b = Buffer.alloc(64 * 1024); b = b.subarray(0, fs.readSync(fd, b, 0, b.length, 0)); } finally { fs.closeSync(fd); }
   } catch (_) { return null; }
+  if (/\.svg$/i.test(file)) return svgSize(b.toString('utf8'));
   if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47) return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
   if (b.length >= 10 && b.toString('ascii', 0, 3) === 'GIF') return { w: b.readUInt16LE(6), h: b.readUInt16LE(8) };
   if (b.length >= 26 && b.toString('ascii', 0, 2) === 'BM') return { w: b.readInt32LE(18), h: Math.abs(b.readInt32LE(22)) };

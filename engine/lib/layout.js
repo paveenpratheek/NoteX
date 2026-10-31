@@ -22,7 +22,7 @@ import path from 'node:path';
 import { buildPlaces, kindOf } from './places.js';
 import { polygonsOf, bboxDistance, distToBBox, itemBBox } from './geometry.js';
 import { CHAIN, FIELD } from './rules.js';
-import { M, measureText, measureNote, fileSize, imageSize, imageShown, isImageName, isPdfName, visualBox, textOf } from './measure.js';
+import { M, measureText, measureNote, fileSize, imageSize, imageShown, isImageName, isPdfName, visualBox, textOf, svgSize } from './measure.js';
 import { checkCanvas, overlapsOf } from './check.js';
 
 export const FREE = 800;
@@ -240,6 +240,21 @@ function keepApart(scene, totemId, ids, opts) {
 
 /* ------------------------------------------------------- script nodes */
 
+/* An <Image> the agent drew as SVG, saved as <name>.svg in the canvas's
+ * sources/ when the write lands - under a name of its own when another
+ * file there already has that name (t-1e8cdd344a). */
+function resolveImage(node, opts) {
+  const data = Buffer.from(node.text.trim(), 'utf8');
+  const base = String(node.attrs.name).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Image';
+  const hash = crypto.createHash('sha256').update(data).digest('hex');
+  const sources = opts.fabricDir ? path.join(opts.fabricDir, 'sources') : null;
+  const sameAs = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') === hash;
+  let name = `${base}.svg`;
+  if (sources && fs.existsSync(path.join(sources, name)) && !sameAs(path.join(sources, name))) name = `${base} (${hash.slice(0, 8)}).svg`;
+  const there = sources ? path.join(sources, name) : null;
+  return { name, isImage: true, isPdf: false, shown: imageShown(svgSize(node.text)), copy: there && fs.existsSync(there) ? null : { name, data } };
+}
+
 /* A <File>: a full path on this machine, copied into the canvas's
  * sources/ - or a name already there. File Fabric loads images and PDFs
  * from sources/ by name, so fabric.json carries no image data
@@ -278,8 +293,8 @@ function measure(node, ctx) {
   switch (node.tag) {
     case 'Text': node.size = measureText(node.text, { size: node.attrs.size || M.FONT, maxWidth: ctx.textMax }); break;
     case 'Note': node.size = measureNote(node.text); break;
-    case 'File': {
-      node.file = resolveFile(node, ctx.opts);
+    case 'File': case 'Image': {
+      node.file = node.tag === 'Image' ? resolveImage(node, ctx.opts) : resolveFile(node, ctx.opts);
       const f = node.file;
       node.size = fileSize({ name: f.name, isImage: f.isImage, imageWidth: f.isImage ? f.shown.w : 200, imageHeight: f.isImage ? f.shown.h : null });
       break;
@@ -397,7 +412,7 @@ function emit(node, ctx, out) {
       out.texts.push({ id, text: node.text, address: ctx.labels.join(' > ') });
       return;
     }
-    case 'File': {
+    case 'File': case 'Image': {
       const id = opts.newId();
       const f = node.file;
       state.files.push({
