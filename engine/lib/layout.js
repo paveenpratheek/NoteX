@@ -6,7 +6,7 @@
  * Sizes go from the inside out. Children stack top to bottom, left edges
  * aligned; <Row> sets them side by side with tops aligned; <Column> stacks
  * them inside a Row. A new totem goes into free space more than 800 px
- * beyond everything on the canvas, so File Fabric's 500 px field and 300 px
+ * beyond everything on the canvas, so File Fabric's FIELD and CHAIN
  * chain never join it to another (t-a94b02f199). <Add> places new items
  * below what a place already holds and grows the place and its parents,
  * pushing aside only the agent's own items - a user's item in the way
@@ -25,12 +25,13 @@ import { CHAIN, FIELD } from './rules.js';
 import { M, measureText, measureNote, fileSize, imageSize, imageShown, isImageName, isPdfName, visualBox, textOf, svgSize } from './measure.js';
 import { checkCanvas, overlapsOf } from './check.js';
 
-export const FREE = 800;
+// A new totem stands beyond the rest's reach (t-4d3c522806).
+export const FREE = FIELD + CHAIN;
 /* Sub-totems sit side by side under their totem's own content, each with
  * its marker above what it holds, this far from each other and from the
- * totem's content and marker: beyond CanvasX's 500 field and 300 chain, so
+ * totem's content and marker: beyond CanvasX's FIELD and CHAIN, so
  * nearness gives every box to its own sub-totem (t-5f45cfc21a). */
-export const SUB_GAP = 600;
+export const SUB_GAP = FIELD + 150;
 
 export class Refusal extends Error {
   constructor(message, node = null) {
@@ -215,7 +216,7 @@ export function settle(scene, e, old, opts, touched) {
 }
 
 /* What an agent's totem grew into must stay clear of every other totem:
- * outside the 500 px field of another totem and the 300 px chain of its
+ * outside the FIELD of another totem and the CHAIN of its
  * items, so File Fabric never counts one totem's things as another's
  * (t-d65b7d40dc). Measured with File Fabric's own chain box, not the drawn
  * one: a 'draw' record File Fabric never shows has no chain box and joins

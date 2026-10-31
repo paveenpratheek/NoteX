@@ -211,7 +211,7 @@ test("keeping totems apart goes by File Fabric's chain box: a 'draw' record it n
   // A pencil stroke there is the user's, File Fabric chains it, so the Add is still refused.
   const s2 = plan();
   s2.drawings.push({ id: 'PEN', type: 'path', points: [{ x: nb.minX, y }, { x: nb.maxX, y: y + 10 }], linkedTotemId: null, areaId: null });
-  assert.throws(() => add(s2), (e) => e instanceof Refusal && /within File Fabric's 300 px of/.test(e.message));
+  assert.throws(() => add(s2), (e) => e instanceof Refusal && /within File Fabric's \d+ px of/.test(e.message));
 });
 
 test('Edit: new words grow the boxes around them; a rename; a user-edited item is refused', () => {

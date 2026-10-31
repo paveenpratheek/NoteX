@@ -188,7 +188,8 @@ async function spacing(board, agent) {
 test('totems stay TOTEM_GAP apart and CanvasX\'s grouping gives each only its own, as one grows (t-5c984630aa)', async (t) => {
   const { writer, board, agent } = setup(t);
   const { TOTEM_GAP } = await import('../engine/lib/agentcanvas.js');
-  assert.equal(TOTEM_GAP, 1200);
+  const { FIELD, CHAIN } = await import('../engine/lib/rules.js');
+  assert.deepEqual([FIELD, CHAIN, TOTEM_GAP], [750, 450, 1600], 'CanvasX\'s field and reach, 1.5 times 500 and 300, and the gap beyond them');
   await writer.submit({ script: totem('A', '<Area name="One"><Text>a</Text></Area>'), owner: 'claude' });
   await writer.submit({ script: totem('B', '<Area name="Two"><Text>b</Text></Area>'), owner: 'claude' });
   for (const n of [2, 4, 6]) {

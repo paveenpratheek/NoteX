@@ -42,12 +42,13 @@ export function assignedAreaOf(point, item, areas, boxes = new Map()) {
   return hits[0] || null;
 }
 
-export const FIELD = 500;
-export const CHAIN = 300;
+// CanvasX's field and the reach round each member, 1.5 times the old 500 and 300 (CanvasX t-08dd5b6ef9).
+export const FIELD = 750;
+export const CHAIN = 450;
 
-/* computeMagneticClusters, script.js L6659: everything within 500 of a
+/* computeMagneticClusters in CanvasX's script.js: everything within FIELD of a
  * totem joins it, the first totem in the list first; then anything within
- * 300 of a member joins that member's totem, outward like a flood.
+ * CHAIN of a member joins that member's totem, outward like a flood.
  * Returns item -> totem for every item that joined one. */
 export function magneticTotems(state) {
   const items = [...(state.areas || []), ...(state.drawings || []), ...(state.files || [])];
