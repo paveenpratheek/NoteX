@@ -931,7 +931,11 @@ async function lookForPhones() {
     $('phone-found').textContent = 'No phone found. Plug it in, unlock it, and pick File transfer in the USB notification - then look again.';
     return;
   }
-  await browsePhone(devices[0].name, []);
+  // Looking again keeps the folder already open, since a replugged phone may now show what it lacked (t-48d69dba14).
+  const at = S.phoneAt && devices.some((d) => d.name === S.phoneAt.device) ? S.phoneAt : null;
+  sel.value = at ? at.device : devices[0].name;
+  if (at && at.segs.length && await browsePhone(at.device, at.segs)) return;
+  await browsePhone(sel.value, []);
 }
 
 async function browsePhone(device, segs) {
@@ -939,8 +943,8 @@ async function browsePhone(device, segs) {
   $('phone-found').textContent = 'Reading the phone…';
   $('phone-use').disabled = true;
   let r;
-  try { r = await engine.phoneBrowse(device, segs); } catch (e) { $('phone-found').textContent = e.message; return; }
-  if (S.phoneAt.device !== device || S.phoneAt.segs !== segs) return; // another folder was opened meanwhile
+  try { r = await engine.phoneBrowse(device, segs); } catch (e) { $('phone-found').textContent = e.message; return false; }
+  if (S.phoneAt.device !== device || S.phoneAt.segs !== segs) return true; // another folder was opened meanwhile
   const crumbs = $('phone-crumbs');
   crumbs.replaceChildren();
   const crumb = (label, to) => { const b = el('button', null, label); b.addEventListener('click', () => browsePhone(device, to)); crumbs.append(b); };
@@ -959,9 +963,14 @@ async function browsePhone(device, segs) {
   if (r.canvasxp) {
     $('phone-found').textContent = `This is CanvasXP's folder on "${r.canvasxp.name}".`;
     $('phone-use').disabled = false;
+  } else if (segs.length <= 1) { // the phone, or its storage: not a folder anyone picks
+    $('phone-found').textContent = 'Open the folder you picked as the target folder in CanvasXP.';
   } else {
-    $('phone-found').textContent = r.folders.length ? 'Open the folder you picked in CanvasXP.' : 'No folders here.';
+    // Why Use this folder is off, said where the button is (t-48d69dba14).
+    $('phone-found').textContent = `${r.folders.length ? '' : 'Windows sees nothing in this folder. '}Use this folder turns on once Windows can see CanvasXP's set-up here. `
+      + 'If this is your target folder: on the phone, open it in CanvasXP and press Set up USB sync. Already done? Unplug the phone, plug it back in, pick File transfer, then press Look again.';
   }
+  return true;
 }
 
 async function usePhoneFolder() {
