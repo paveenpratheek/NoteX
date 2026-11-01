@@ -274,13 +274,15 @@ export class PhoneSync {
   /* A status file for CanvasXP, which shows the user what the sync is doing
    * (t-2ff7b152e9): a new file at every step, never one rewritten, since
    * Windows asks before replacing a file on the phone (t-87e7049e0f). With
-   * no fields it repeats the last step - the heartbeat while the agent
-   * works. A status that cannot be written never stops the sync. */
+   * no fields it repeats the last step - the heartbeat all through the
+   * sync (t-2f21cca482). A status that cannot be written never stops the sync. */
   status(fields = null) {
     const s = this.statusing;
     if (!s) return Promise.resolve();
     if (fields) s.fields = fields;
+    else if (s.pending) return s.chain; // a heartbeat while one is still on its way adds nothing
     const seq = ++s.seq;
+    s.pending = (s.pending || 0) + 1;
     const body = { sync: s.id, seq, at: new Date(this.now()).toISOString(), from: this.hostname, ...s.fields };
     s.chain = s.chain.then(async () => {
       const t = this.tmp();
@@ -288,7 +290,7 @@ export class PhoneSync {
         const f = path.join(t, `${s.id}-${String(seq).padStart(5, '0')}.json`);
         fs.writeFileSync(f, JSON.stringify(body));
         await this.transport.push(s.device, f, [...s.xp, 'status']);
-      } catch (e) { this.log(`Could not tell the phone how the sync goes: ${e.message}`); } finally { fs.rmSync(t, { recursive: true, force: true }); }
+      } catch (e) { this.log(`Could not tell the phone how the sync goes: ${e.message}`); } finally { s.pending--; fs.rmSync(t, { recursive: true, force: true }); }
     });
     return s.chain;
   }
@@ -313,6 +315,8 @@ export class PhoneSync {
     for (const f of ['incoming', 'status']) if (!top.some((i) => i.folder && i.name === f)) await this.transport.mkdir(device, xp, f);
     this.statusing = { id: `s-${stamp}`, seq: 0, device, xp, chain: Promise.resolve(), fields: null };
     this.status({ stage: 'reading', text: 'NoteX is reading your canvases' });
+    // The phone hears from NoteX all through the sync, so a long copy is not taken for NoteX gone (t-2f21cca482).
+    const beat = setInterval(() => this.status(), this.heartbeatMs);
     try {
       const result = await this.exchange({ device, root, xp, ws, stamp, top });
       await this.status({ stage: 'done', text: summaryOf(result), batch: result.batch });
@@ -320,7 +324,7 @@ export class PhoneSync {
     } catch (e) {
       await this.status({ stage: 'failed', text: e.message });
       throw e;
-    } finally { this.statusing = null; }
+    } finally { clearInterval(beat); this.statusing = null; }
   }
 
   async exchange({ device, root, xp, ws, stamp, top }) {
@@ -478,8 +482,7 @@ export class PhoneSync {
     const refuse = (m, error) => { result.unanswered.push({ id: m.id, canvas: m.canvas, error }); ops.push({ op: 'unanswered', id: m.id, dir: m.dir, error }); };
     if (todo.length && !this.ask) for (const m of todo) refuse(m, 'NoteX here cannot run the agent.');
     else if (todo.length) {
-      const beat = setInterval(() => this.status(), this.heartbeatMs);
-      try {
+      {
         for (let i = 0; i < todo.length; i++) {
           const m = todo[i];
           const step = { stage: 'agent', text: `The agent is answering your message${todo.length === 1 ? '' : 's'}`, done: i, total: todo.length, current: m.id, canvas: m.canvas };
@@ -498,7 +501,7 @@ export class PhoneSync {
           result.answered.push({ id: m.id, canvas: m.canvas, status: (r && r.status) || 'answered' });
         }
         this.status({ stage: 'agent', text: `The agent answered your message${todo.length === 1 ? '' : 's'}`, done: todo.length, total: todo.length });
-      } finally { clearInterval(beat); }
+      }
     }
     // CanvasXP removes what was answered - NoteX cannot delete on the phone - told in every batch until it has.
     const done = new Set(this.data.handled);

@@ -20,30 +20,99 @@ import { PhoneError } from './phone.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const MTP_PS1 = path.join(HERE, 'mtp.ps1');
 
+/* One helper answers a whole sync (t-2f21cca482): mtp.ps1 -Op serve, a JSON
+ * request per line. Requests go one at a time - two shell copies to the
+ * phone at once stalled each other - and the helper remembers the folders it
+ * walked to. A request that outlasts its time is given up and the helper
+ * started afresh for the next; one left idle closes itself. */
 export class ShellTransport {
-  constructor({ powershell = 'powershell.exe', script = MTP_PS1, timeoutMs = 30 * 60_000 } = {}) {
-    Object.assign(this, { powershell, script, timeoutMs });
+  constructor({ powershell = 'powershell.exe', script = MTP_PS1, timeoutMs = 3 * 60_000, perFileMs = 90_000, idleMs = 60_000 } = {}) {
+    Object.assign(this, { powershell, script, timeoutMs, perFileMs, idleMs });
+    this.proc = null;
+    this.queue = Promise.resolve();
+    this.seq = 0;
+    this.idleTimer = null;
+  }
+
+  helper() {
+    if (this.proc) return this.proc;
+    const p = spawn(this.powershell, ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', this.script, '-Op', 'serve'], { windowsHide: true });
+    p.waiting = null; // { id, resolve, reject }
+    let buf = '';
+    let err = '';
+    p.stdout.setEncoding('utf8');
+    p.stdout.on('data', (d) => {
+      buf += d;
+      let n;
+      while ((n = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, n).replace(/^﻿/, '').trim();
+        buf = buf.slice(n + 1);
+        if (!line) continue;
+        let r;
+        try { r = JSON.parse(line); } catch (_) { continue; }
+        const w = p.waiting;
+        if (!w || r.id !== w.id) continue;
+        p.waiting = null;
+        if (!r.ok) w.reject(new PhoneError('mtp', r.error || 'The phone helper failed.'));
+        else w.resolve(r);
+      }
+    });
+    p.stderr.on('data', (d) => { err = (err + d).slice(-600); });
+    const gone = (why) => {
+      if (this.proc === p) this.proc = null;
+      const w = p.waiting;
+      p.waiting = null;
+      if (w) w.reject(why);
+    };
+    p.on('error', (e) => gone(new PhoneError('no-powershell', `Could not start PowerShell: ${e.message}`)));
+    p.on('close', () => gone(new PhoneError('mtp', `The phone helper stopped${err ? `: ${err.trim().slice(0, 300)}` : '.'}`)));
+    this.proc = p;
+    return p;
+  }
+
+  // How long a request may take: a pull is given time for each of its files.
+  limitOf(op, args) {
+    if (op === 'pull') return this.timeoutMs + this.perFileMs * ((args.names || []).length || 1);
+    if (op === 'push') return this.timeoutMs * 4;
+    return this.timeoutMs;
   }
 
   call(op, args = {}) {
-    return new Promise((resolve, reject) => {
+    const run = () => new Promise((resolve, reject) => {
       if (process.platform !== 'win32') return reject(new PhoneError('no-windows', 'Phone sync over the cable needs Windows.'));
-      const p = spawn(this.powershell, ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', this.script, '-Op', op], { windowsHide: true });
-      let out = '';
-      let err = '';
-      const timer = setTimeout(() => { p.kill(); reject(new PhoneError('timeout', `The phone did not answer (${op}).`)); }, this.timeoutMs);
-      p.stdout.on('data', (d) => { out += d; });
-      p.stderr.on('data', (d) => { err += d; });
-      p.on('error', (e) => { clearTimeout(timer); reject(new PhoneError('no-powershell', `Could not start PowerShell: ${e.message}`)); });
-      p.on('close', () => {
-        clearTimeout(timer);
-        let r;
-        try { r = JSON.parse(out.replace(/^﻿/, '')); } catch (_) { return reject(new PhoneError('mtp', `The phone helper answered nothing readable${err ? `: ${err.trim().slice(0, 300)}` : '.'}`)); }
-        if (!r.ok) return reject(new PhoneError('mtp', r.error || 'The phone helper failed.'));
-        resolve(r);
-      });
-      p.stdin.end(JSON.stringify(args));
+      clearTimeout(this.idleTimer);
+      const p = this.helper();
+      const id = ++this.seq;
+      const timer = setTimeout(() => {
+        // A request that outlasts its time: the helper may be stuck in the shell - start afresh.
+        if (p.waiting && p.waiting.id === id) {
+          p.waiting = null;
+          if (this.proc === p) this.proc = null;
+          try { p.kill(); } catch (_) { /* gone already */ }
+          reject(new PhoneError('timeout', `The phone did not answer (${op}) - unplug it, plug it back in and sync again.`));
+        }
+      }, this.limitOf(op, args));
+      p.waiting = {
+        id,
+        resolve: (r) => { clearTimeout(timer); resolve(r); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      };
+      p.stdin.write(`${JSON.stringify({ ...args, id, op })}\n`);
     });
+    const done = this.queue.then(run, run);
+    this.queue = done.catch(() => {}).then(() => {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = setTimeout(() => this.close(), this.idleMs);
+      this.idleTimer.unref?.();
+    });
+    return done;
+  }
+
+  close() {
+    clearTimeout(this.idleTimer);
+    const p = this.proc;
+    this.proc = null;
+    if (p) { try { p.stdin.end(); } catch (_) { /* gone already */ } }
   }
 
   async devices() { return (await this.call('devices')).devices || []; }

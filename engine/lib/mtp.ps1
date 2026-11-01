@@ -1,12 +1,17 @@
 # The phone over USB File transfer (MTP), through Windows' shell (t-71306596ff).
 #
 #   powershell -NoProfile -STA -File mtp.ps1 -Op <devices|list|pull|push|mkdir>
+#   powershell -NoProfile -STA -File mtp.ps1 -Op serve
 #
-# The arguments come as JSON on stdin and the answer goes to stdout as JSON:
-# {"ok":true,...} or {"ok":false,"error":"..."}. A phone is named by how it
-# shows under This PC; "folder:<path>" names a plain folder instead, which
-# the tests use. Shell copies run in the background, so each copy is waited
-# for until the file or folder is there whole.
+# One operation: its arguments come as JSON on stdin and the answer goes to
+# stdout as JSON: {"ok":true,...} or {"ok":false,"error":"..."}. With serve,
+# one helper answers a whole sync (t-2f21cca482): each line on stdin is a
+# request {"id","op",...args}, each answer one line {"id","ok",...}, one at
+# a time, and the folders it walked to are remembered, so a file is not
+# found again by walking from This PC down. A phone is named by how it shows
+# under This PC; "folder:<path>" names a plain folder instead, which the
+# tests use. Shell copies run in the background, so each copy is waited for
+# until the file or folder is there whole.
 param([string]$Op)
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [Text.Encoding]::UTF8
@@ -14,8 +19,9 @@ $ErrorActionPreference = 'Stop'
 $sh = New-Object -ComObject Shell.Application
 # No progress window, yes to all, make folders without asking, no error windows.
 $COPY = 4 + 16 + 512 + 1024
+$script:folders = @{}
 
-function Out-Json($o) { [Console]::Out.Write(($o | ConvertTo-Json -Depth 8 -Compress)) }
+function To-Json($o) { return ($o | ConvertTo-Json -Depth 8 -Compress) }
 
 function Is-Device($item) { return $item.IsFolder -and ([string]$item.Path).Contains('\\?\') }
 
@@ -35,17 +41,29 @@ function Name-Of($item) {
   return [string]$item.Name
 }
 
+# A child by name: its shown name first, which needs no question to the phone, then its real name.
 function Child($folder, [string]$name) {
-  foreach ($i in $folder.Items()) { if ((Name-Of $i) -eq $name) { return $i } }
+  $items = @($folder.Items())
+  foreach ($i in $items) { if ([string]$i.Name -eq $name) { return $i } }
+  foreach ($i in $items) { if ((Name-Of $i) -eq $name) { return $i } }
   return $null
 }
 
-function Walk([string]$device, $segs) {
-  $f = Root $device
-  foreach ($s in $segs) {
+# A folder by its path, through the folders already walked to; a miss walks again from the top.
+function Walk([string]$device, $segs, [switch]$Fresh) {
+  if ($Fresh) { $script:folders = @{} }
+  $key = "$device"
+  if ($script:folders.ContainsKey($key)) { $f = $script:folders[$key] } else { $f = Root $device; $script:folders[$key] = $f }
+  foreach ($s in @($segs)) {
+    $key = "$key`n$s"
+    if ($script:folders.ContainsKey($key)) { $f = $script:folders[$key]; continue }
     $i = Child $f $s
-    if (-not $i -or -not $i.IsFolder) { throw "No folder $s on $device." }
+    if (-not $i -or -not $i.IsFolder) {
+      if (-not $Fresh) { return Walk $device $segs -Fresh }
+      throw "No folder $s on $device."
+    }
     $f = $i.GetFolder
+    $script:folders[$key] = $f
   }
   return $f
 }
@@ -61,22 +79,25 @@ function Count-Files($folder) {
   return $n
 }
 
+# Waits until done says so; every second look walks again, in case the shell kept an old view.
 function Wait-Until([scriptblock]$done, [int]$seconds, [string]$what) {
   $until = (Get-Date).AddSeconds($seconds)
+  $n = 0
   while ((Get-Date) -lt $until) {
-    try { if (& $done) { return } } catch {}
+    $fresh = ($n % 4) -eq 3
+    try { if (& $done $fresh) { return } } catch {}
+    $n++
     Start-Sleep -Milliseconds 250
   }
   throw "Timed out copying $what."
 }
 
-try {
-  $a = [Console]::In.ReadToEnd() | ConvertFrom-Json
-  switch ($Op) {
+function Invoke-Op([string]$op, $a) {
+  switch ($op) {
     'devices' {
       $list = @()
       foreach ($i in $sh.Namespace(17).Items()) { if (Is-Device $i) { $list += @{ name = [string]$i.Name } } }
-      Out-Json @{ ok = $true; devices = $list }
+      return @{ devices = $list }
     }
     'list' {
       $f = Walk $a.device @($a.path)
@@ -86,7 +107,7 @@ try {
         try { $d = $i.ExtendedProperty('System.DateModified'); if ($d) { $m = ([datetime]$d).ToUniversalTime().ToString('o') } } catch {}
         $items += @{ name = (Name-Of $i); folder = [bool]$i.IsFolder; size = (Size-Of $i); modified = $m }
       }
-      Out-Json @{ ok = $true; items = $items }
+      return @{ items = $items }
     }
     'pull' {
       $f = Walk $a.device @($a.path)
@@ -94,6 +115,7 @@ try {
       if (-not $dest) { throw "No folder $($a.dest)." }
       foreach ($name in @($a.names)) {
         $i = Child $f $name
+        if (-not $i) { $f = Walk $a.device @($a.path) -Fresh; $i = Child $f $name }
         if (-not $i -or $i.IsFolder) { throw "No file $name on the phone." }
         $size = Size-Of $i
         $target = Join-Path ([string]$a.dest) $name
@@ -105,7 +127,7 @@ try {
           $s = [IO.File]::Open($target, 'Open', 'Read', 'None'); $s.Close(); return $true
         } (60 + [int]($size / 1MB) * 2) $name
       }
-      Out-Json @{ ok = $true }
+      return @{}
     }
     'push' {
       $src = [string]$a.src
@@ -114,22 +136,63 @@ try {
       $want = if ($isDir) { (Get-ChildItem -LiteralPath $src -Recurse -File).Count } else { (Get-Item -LiteralPath $src).Length }
       $bytes = if ($isDir) { (Get-ChildItem -LiteralPath $src -Recurse -File | Measure-Object Length -Sum).Sum } else { $want }
       (Walk $a.device @($a.path)).CopyHere($src, $COPY)
+      $device = $a.device
+      $path = @($a.path)
       Wait-Until {
-        $i = Child (Walk $a.device @($a.path)) $leaf
+        param($fresh)
+        $parent = if ($fresh) { Walk $device $path -Fresh } else { Walk $device $path }
+        $i = Child $parent $leaf
         if (-not $i) { return $false }
         if ($isDir) { return (Count-Files $i.GetFolder) -ge $want }
         return (Size-Of $i) -eq $want
       } (60 + [int]($bytes / 1MB) * 2) $leaf
-      Out-Json @{ ok = $true }
+      return @{}
     }
     'mkdir' {
       $f = Walk $a.device @($a.path)
       if (-not (Child $f $a.name)) { $f.NewFolder([string]$a.name) }
-      Wait-Until { $i = Child (Walk $a.device @($a.path)) $a.name; return [bool]($i -and $i.IsFolder) } 30 $a.name
-      Out-Json @{ ok = $true }
+      $device = $a.device
+      $path = @($a.path)
+      $name = [string]$a.name
+      Wait-Until {
+        param($fresh)
+        $parent = if ($fresh) { Walk $device $path -Fresh } else { Walk $device $path }
+        $i = Child $parent $name
+        return [bool]($i -and $i.IsFolder)
+      } 30 $name
+      return @{}
     }
-    default { throw "No operation $Op." }
+    default { throw "No operation $op." }
   }
+}
+
+if ($Op -eq 'serve') {
+  while ($true) {
+    $line = [Console]::In.ReadLine()
+    if ($null -eq $line) { break }
+    if (-not $line.Trim()) { continue }
+    $id = $null
+    try {
+      $req = $line | ConvertFrom-Json
+      $id = $req.id
+      $r = Invoke-Op ([string]$req.op) $req
+      $r.ok = $true
+    } catch {
+      $script:folders = @{} # the phone may have gone away or changed: walk afresh next time
+      $r = @{ ok = $false; error = $_.Exception.Message }
+    }
+    $r.id = $id
+    [Console]::Out.WriteLine((To-Json $r))
+    [Console]::Out.Flush()
+  }
+  exit 0
+}
+
+try {
+  $a = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  $r = Invoke-Op $Op $a
+  $r.ok = $true
+  [Console]::Out.Write((To-Json $r))
 } catch {
-  Out-Json @{ ok = $false; error = $_.Exception.Message }
+  [Console]::Out.Write((To-Json @{ ok = $false; error = $_.Exception.Message }))
 }
