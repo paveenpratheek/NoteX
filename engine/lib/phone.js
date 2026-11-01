@@ -36,7 +36,8 @@ import crypto from 'node:crypto';
 
 export const XP_DIR = '_canvasxp';
 const LOCK = '.fabric_lock';
-const HEARTBEAT_MS = 20_000; // a status at least this often while the agent works
+const HEARTBEAT_MS = 20_000; // a status at least this often all through a sync
+const PULL_AT_ONCE = 8; // files copied from the phone in one request
 const KEEP_HANDLED = 500; // ids of messages answered, so none is answered twice
 const CANVAS_OPS = new Set(['copy', 'put', 'del', 'drop']);
 export const QUEUE_DIR = 'Queued messages';
@@ -552,11 +553,18 @@ export class PhoneSync {
         if (!byDir.has(key)) byDir.set(key, []);
         byDir.get(key).push(name);
       }
+      let copied = 0;
       for (const [dir, names] of byDir) {
         const segs = dir ? dir.split('/') : [];
         const dest = path.join(t, ...segs);
         fs.mkdirSync(dest, { recursive: true });
-        await this.transport.pull(device, [...root, from, ...segs], names, dest);
+        // A few files at a time, so the phone's status heartbeat gets through between them (t-2f21cca482).
+        for (let i = 0; i < names.length; i += PULL_AT_ONCE) {
+          const chunk = names.slice(i, i + PULL_AT_ONCE);
+          this.progress = `Copying ${from} from the phone (${copied + chunk.length} of ${want.length} files)`;
+          await this.transport.pull(device, [...root, from, ...segs], chunk, dest);
+          copied += chunk.length;
+        }
       }
       for (const [rel, sha] of want) {
         let got = null;
