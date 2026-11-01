@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { PhoneSync, decide, overlay, safeRel, safeCanvas, XP_DIR } from '../engine/lib/phone.js';
+import { PhoneSync, decide, overlay, safeRel, safeCanvas, XP_DIR, QUEUE_DIR, parseQueued } from '../engine/lib/phone.js';
 import { FolderTransport } from '../engine/lib/mtp.js';
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
@@ -76,8 +76,8 @@ function xpApply(phone) {
       if (op.op === 'del') fs.rmSync(path.join(phone, op.canvas, op.path), { force: true });
       if (op.op === 'drop') fs.rmSync(path.join(phone, op.canvas), { recursive: true, force: true });
       if (op.op === 'chat') write(phone, `${XP_DIR}/chats/${op.canvas}.json`, fs.readFileSync(path.join(b, 'chats', `${op.canvas}.json`)));
-      if (op.op === 'answered') for (const id of op.ids) fs.rmSync(path.join(phone, XP_DIR, 'outbox', id), { recursive: true, force: true });
-      if (op.op === 'unanswered' && fs.existsSync(path.join(phone, XP_DIR, 'outbox', op.id))) write(phone, `${XP_DIR}/outbox/${op.id}/error.json`, JSON.stringify({ error: op.error }));
+      if (op.op === 'answered') for (const it of op.items) fs.rmSync(path.join(phone, QUEUE_DIR, it.dir), { recursive: true, force: true });
+      if (op.op === 'unanswered' && fs.existsSync(path.join(phone, QUEUE_DIR, op.dir))) write(phone, `${QUEUE_DIR}/${op.dir}/Not answered.txt`, op.error);
     }
     fs.rmSync(b, { recursive: true });
   }
@@ -334,10 +334,13 @@ test('the engine: browse to the phone\'s folder, set it up, sync, and the canvas
   assert.equal((await call('DELETE', '/api/phone')).body.setup, null);
 });
 
-/* CanvasXP's chat on an agent canvas: a message kept in the outbox, files first. */
-function xpQueue(phone, id, canvas, text, files = []) {
-  for (const [name, bytes] of files) write(phone, `${XP_DIR}/outbox/${id}/files/${name}`, bytes);
-  write(phone, `${XP_DIR}/outbox/${id}/message.json`, JSON.stringify({ id, canvas, text, model: 'haiku', at: '2026-11-01T10:00:00Z', files: files.map(([name, bytes]) => ({ name, size: bytes.length, sha: sha(bytes) })) }));
+/* CanvasXP's chat on an agent canvas: a queued message in the target folder, attachments first. */
+function xpQueue(phone, id, canvas, prompt, files = [], description = '') {
+  const dir = `${canvas} - 2026-11-01 10.0${id.slice(-1)}`;
+  for (const [name, bytes] of files) write(phone, `${QUEUE_DIR}/${dir}/${name}`, bytes);
+  const meta = { id, canvas, model: 'haiku', at: `2026-11-01T10:0${id.slice(-1)}:00Z`, files: files.map(([name, bytes]) => ({ name, size: bytes.length, sha: sha(bytes) })) };
+  write(phone, `${QUEUE_DIR}/${dir}/message.md`, `# Queued message\n\nCanvas: ${canvas}\nQueued: 2026-11-01 10:00\n\n## Description\n\n${description || '(none)'}\n\n## Prompt\n\n${prompt || '(none)'}\n\n## Attachments\n\n${files.map(([n]) => `- ${n}`).join('\n') || '(none)'}\n\n<!-- CanvasXP ${JSON.stringify(meta)} -->\n`);
+  return dir;
 }
 const statuses = (phone) => {
   const d = path.join(phone, XP_DIR, 'status');
@@ -374,21 +377,21 @@ test('messages queued in CanvasXP\'s chat are answered at the sync, the agent\'s
   assert.deepEqual(JSON.parse(read(s.phone, `${XP_DIR}/chats/Board.json`)).chat, [], 'the agent canvas went with its chat');
 
   const PNG = Buffer.from('\x89PNG fake');
-  xpQueue(s.phone, 'm-1', 'Board', 'put the photo by the plan', [['beach.png', PNG]]);
-  xpQueue(s.phone, 'm-2', 'Notes', 'tidy this');
-  write(s.phone, `${XP_DIR}/outbox/m-3/files/half.jpg`, 'still writing'); // no message.json yet
+  const d1 = xpQueue(s.phone, 'm-1', 'Board', 'put the photo by the plan', [['beach.png', PNG]], 'the beach on day one');
+  const d2 = xpQueue(s.phone, 'm-2', 'Notes', 'tidy this');
+  write(s.phone, `${QUEUE_DIR}/Board - 2026-11-01 10.03/half.jpg`, 'still writing'); // no message.md yet
   fs.rmSync(path.join(s.phone, XP_DIR, 'status'), { recursive: true, force: true });
   r = await sync.sync();
   assert.equal(r.ok, true, r.error);
   assert.deepEqual(r.answered, [{ id: 'm-1', canvas: 'Board', status: 'done' }]);
   assert.deepEqual(r.unanswered.map((u) => [u.id, u.error]), [['m-2', 'Notes is not assigned to the agent on the PC any more.']]);
-  assert.equal(asked[0].text, 'put the photo by the plan');
+  assert.equal(asked[0].text, 'put the photo by the plan\n\nAbout what I attached: the beach on day one');
   assert.equal(asked[0].model, 'haiku');
   assert.deepEqual(asked[0].files.map((f) => [f.name, f.bytes.equals(PNG)]), [['beach.png', true]]);
   assert.deepEqual(r.pushed, ['Board'], 'what the agent changed goes back in the same sync');
   const b = lastBatch(s.phone);
-  assert.deepEqual(b.ops.find((o) => o.op === 'answered'), { op: 'answered', ids: ['m-1'] });
-  assert.ok(b.ops.some((o) => o.op === 'unanswered' && o.id === 'm-2'));
+  assert.deepEqual(b.ops.find((o) => o.op === 'answered'), { op: 'answered', items: [{ id: 'm-1', dir: d1 }] });
+  assert.ok(b.ops.some((o) => o.op === 'unanswered' && o.id === 'm-2' && o.dir === d2));
   assert.ok(b.ops.some((o) => o.op === 'chat' && o.canvas === 'Board'));
   const st = statuses(s.phone);
   assert.ok(st.every((x) => x.sync === st[0].sync) && st.map((x) => x.seq).join() === st.map((_, i) => i + 1).join(), 'one sync, numbered in order');
@@ -402,11 +405,12 @@ test('messages queued in CanvasXP\'s chat are answered at the sync, the agent\'s
   // Not taken in yet: the next sync does not answer m-1 again, and still tells the phone to remove it.
   r = await sync.sync();
   assert.equal(asked.filter((m) => m.canvas === 'Board').length, 1, 'answered once');
-  assert.deepEqual(lastBatch(s.phone).ops.find((o) => o.op === 'answered'), { op: 'answered', ids: ['m-1'] });
+  assert.deepEqual(lastBatch(s.phone).ops.find((o) => o.op === 'answered'), { op: 'answered', items: [{ id: 'm-1', dir: d1 }] });
   xpApply(s.phone);
-  assert.ok(!fs.existsSync(path.join(s.phone, XP_DIR, 'outbox', 'm-1')), 'the answered message is gone from the phone');
-  assert.match(read(s.phone, `${XP_DIR}/outbox/m-2/error.json`), /not assigned/);
-  assert.ok(fs.existsSync(path.join(s.phone, XP_DIR, 'outbox', 'm-3')), 'half a message waits');
+  assert.ok(!fs.existsSync(path.join(s.phone, QUEUE_DIR, d1)), 'the answered message is gone from the phone');
+  assert.match(read(s.phone, `${QUEUE_DIR}/${d2}/Not answered.txt`), /not assigned/);
+  assert.ok(fs.existsSync(path.join(s.phone, QUEUE_DIR, 'Board - 2026-11-01 10.03')), 'half a message waits');
+  assert.ok(!r.pushed.includes(QUEUE_DIR) && !fs.existsSync(path.join(s.ws, QUEUE_DIR)), 'the queue is never taken for a canvas');
   assert.equal(JSON.parse(read(s.phone, `${XP_DIR}/chats/Board.json`)).chat.length, 2);
   assert.equal(read(s.phone, 'Board/fabric.json'), '{"v":2}');
   r = await sync.sync();
@@ -434,7 +438,7 @@ test('the engine answers a queued message through the arranger, with its files k
   write(s.data, 'config.json', JSON.stringify({ workspace: s.ws, placing: false, ragx: path.join(s.tmp, 'no-ragx') }));
   xpManifest(s.phone);
   const PDF = Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n');
-  xpQueue(s.phone, 'm-1', 'Board', 'file the survey', [['survey.pdf', PDF]]);
+  xpQueue(s.phone, 'm-1', 'Board', 'file the survey', [['survey.pdf', PDF]], 'the 2024 survey');
   const prompts = [];
   const arrangerRun = async (req) => {
     prompts.push(req);
@@ -455,9 +459,18 @@ test('the engine answers a queued message through the arranger, with its files k
   assert.deepEqual(rep.last.answered, [{ id: 'm-1', canvas: 'Board', status: 'done' }]);
   assert.equal(prompts[0].model, 'haiku');
   const drop = (await call('GET', '/api/inbox')).body.drops.find((d) => d.name === 'survey.pdf');
-  assert.deepEqual([drop.status, drop.canvas, drop.ask, drop.via], ['placed', 'Board', 'file the survey', 'canvasxp']);
+  assert.deepEqual([drop.status, drop.canvas, drop.ask, drop.via], ['placed', 'Board', 'file the survey\n\nAbout what I attached: the 2024 survey', 'canvasxp']);
   const chat = JSON.parse(fs.readFileSync(path.join(s.phone, XP_DIR, 'incoming', rep.last.batch, 'chats', 'Board.json'), 'utf8'));
   assert.deepEqual(chat.chat.map((c) => [c.who, c.source || null]), [['user', 'canvasxp'], ['agent', null]]);
   assert.equal(chat.chat[1].text, 'Filed it.');
   assert.ok(rep.last.pushed.includes('Board'), 'the canvas the agent drew goes to the phone');
+});
+
+test('a queued message.md is read from its headings, so an edit before the sync counts, and its comment gives id, canvas and hashes', () => {
+  const meta = { id: 'm-9', canvas: 'Board', files: [] };
+  const md = `# Queued message\n\nCanvas: Board\n\n## Description\n\nTwo photos\nof the beach\n\n## Prompt\n\n(none)\n\n## Attachments\n\n(none)\n\n<!-- CanvasXP ${JSON.stringify(meta)} -->\n`;
+  const q = parseQueued(md);
+  assert.deepEqual([q.meta.id, q.description, q.prompt], ['m-9', 'Two photos\nof the beach', '']);
+  assert.equal(parseQueued('# just notes'), null);
+  assert.equal(parseQueued('<!-- CanvasXP {broken -->'), null);
 });

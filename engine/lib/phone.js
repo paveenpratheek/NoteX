@@ -9,11 +9,13 @@
  *   incoming/<id>/ what NoteX sends: files/<canvas>/<path>, chats/<canvas>.json
  *                  (an agent canvas's conversation) and, copied last,
  *                  changes.json saying what to write and delete;
- *   outbox/<id>/   a message written to the agent in CanvasXP's chat while
- *                  away from the PC: files/ and, written last, message.json.
- *                  NoteX answers them at the sync (t-e4196083e7);
  *   status/        NoteX's steps while it syncs, a new file at each, which
  *                  CanvasXP shows the user (t-2ff7b152e9).
+ * and, where the user can read them, Queued messages/<canvas> - <date time>/:
+ * a message written to the agent in CanvasXP's chat while away from the PC -
+ * its attachments and, written last, message.md with the canvas, a
+ * Description and a Prompt (CanvasX t-0b4e61bf2b). NoteX answers them at the
+ * sync (t-e4196083e7).
  * NoteX never replaces or deletes anything on the phone - over File transfer
  * Windows asks before either - so it only adds batch folders, and CanvasXP,
  * which has full access to its folder, applies them once every hash checks.
@@ -37,6 +39,31 @@ const LOCK = '.fabric_lock';
 const HEARTBEAT_MS = 20_000; // a status at least this often while the agent works
 const KEEP_HANDLED = 500; // ids of messages answered, so none is answered twice
 const CANVAS_OPS = new Set(['copy', 'put', 'del', 'drop']);
+export const QUEUE_DIR = 'Queued messages';
+
+/* A queued message's message.md, as CanvasXP writes it: headings the user
+ * can read - ## Description, ## Prompt, ## Attachments - and a closing
+ * comment with its id, canvas, model and each attachment's hash. The words
+ * are read from the headings, so an edit to them before the sync counts;
+ * "(none)" is an empty field. Null when it is not one. */
+export function parseQueued(md) {
+  const m = /<!--\s*CanvasXP\s+(\{[\s\S]*?\})\s*-->/.exec(String(md || ''));
+  if (!m) return null;
+  let meta;
+  try { meta = JSON.parse(m[1]); } catch (_) { return null; }
+  const body = String(md).slice(0, m.index);
+  const section = (name) => {
+    const s = new RegExp(`^##\\s+${name}\\s*$([\\s\\S]*?)(?=^##\\s|$(?![\\s\\S]))`, 'm').exec(body);
+    const text = s ? s[1].trim() : '';
+    return text === '(none)' ? '' : text;
+  };
+  return { meta, description: section('Description'), prompt: section('Prompt') };
+}
+
+/* What the agent is asked: the prompt, and what the user said the attachments are. */
+export function queuedAsk({ prompt, description }) {
+  return [prompt, description && `About what I attached: ${description}`].filter(Boolean).join('\n\n');
+}
 
 export class PhoneError extends Error {
   constructor(code, message) { super(message); this.name = 'PhoneError'; this.code = code; }
@@ -322,8 +349,8 @@ export class PhoneSync {
     const ops = [];
 
     // Messages queued in CanvasXP's chat go to the agent first, so what it changes goes back in this batch.
-    const outbox = top.some((i) => i.folder && i.name === 'outbox') ? await this.readOutbox(device, xp) : [];
-    await this.answer(device, xp, outbox, result, ops);
+    const queue = await this.readQueue(device, root);
+    await this.answer(device, root, queue, result, ops);
 
     this.progress = 'Reading the workspace';
     this.status({ stage: 'reading', text: 'NoteX is comparing the canvases' });
@@ -413,31 +440,42 @@ export class PhoneSync {
     return result;
   }
 
-  /* The messages in CanvasXP's outbox, oldest first: each a folder holding
-   * files/ and, written last, message.json - one without it is still being
-   * written and waits. */
-  async readOutbox(device, xp) {
-    let ids = [];
-    try { ids = (await this.transport.list(device, [...xp, 'outbox'])).filter((i) => i.folder && safeSegment(i.name)).map((i) => i.name).sort(); } catch (_) { return []; }
+  /* The phone's queued messages (CanvasX t-0b4e61bf2b), oldest first: each a
+   * folder in Queued messages holding its attachments and, written last,
+   * message.md - one without it is still being written and waits. */
+  async readQueue(device, root) {
+    let dirs = [];
+    try { dirs = (await this.transport.list(device, [...root, QUEUE_DIR])).filter((i) => i.folder && safeSegment(i.name)).map((i) => i.name); } catch (_) { return []; }
     const out = [];
-    for (const id of ids) {
-      const msg = await this.readJson(device, [...xp, 'outbox', id], 'message.json');
-      if (!msg) continue;
-      const files = Array.isArray(msg.files) ? msg.files : [];
-      const ok = safeCanvas(msg.canvas) && typeof (msg.text ?? '') === 'string' && files.every((f) => f && safeSegment(f.name) && /^[0-9a-f]{64}$/.test(f.sha));
-      out.push({ id, ok, canvas: msg.canvas, text: String(msg.text || ''), model: typeof msg.model === 'string' ? msg.model : null, files: ok ? files : [] });
+    for (const dir of dirs) {
+      const q = parseQueued(await this.readText(device, [...root, QUEUE_DIR, dir], 'message.md'));
+      if (!q) continue;
+      const { meta } = q;
+      const files = Array.isArray(meta.files) ? meta.files : [];
+      const id = typeof meta.id === 'string' && safeSegment(meta.id) ? meta.id : `dir:${dir}`;
+      const ok = safeCanvas(meta.canvas) && files.every((f) => f && safeSegment(f.name) && /^[0-9a-f]{64}$/.test(f.sha));
+      out.push({ id, dir, ok, canvas: meta.canvas, at: String(meta.at || ''), text: queuedAsk(q), model: typeof meta.model === 'string' ? meta.model : null, files: ok ? files : [] });
     }
-    return out;
+    return out.sort((a, b) => a.at.localeCompare(b.at) || a.dir.localeCompare(b.dir));
+  }
+
+  /* A small text file from the phone, or null. */
+  async readText(device, segs, name) {
+    const t = this.tmp();
+    try {
+      await this.transport.pull(device, segs, [name], t);
+      return fs.readFileSync(path.join(t, name), 'utf8');
+    } catch (_) { return null; } finally { fs.rmSync(t, { recursive: true, force: true }); }
   }
 
   /* Each queued message not yet answered goes to the agent, one after
    * another (t-e4196083e7). One the agent saw is handled, whatever it
    * answered; one refused before it - not the agent's canvas, a file it
    * cannot take - stays queued with the reason (t-957b09f2fe). */
-  async answer(device, xp, outbox, result, ops) {
+  async answer(device, root, queue, result, ops) {
     const handled = new Set(this.data.handled);
-    const todo = outbox.filter((m) => !handled.has(m.id));
-    const refuse = (m, error) => { result.unanswered.push({ id: m.id, canvas: m.canvas, error }); ops.push({ op: 'unanswered', id: m.id, error }); };
+    const todo = queue.filter((m) => !handled.has(m.id));
+    const refuse = (m, error) => { result.unanswered.push({ id: m.id, canvas: m.canvas, error }); ops.push({ op: 'unanswered', id: m.id, dir: m.dir, error }); };
     if (todo.length && !this.ask) for (const m of todo) refuse(m, 'NoteX here cannot run the agent.');
     else if (todo.length) {
       const beat = setInterval(() => this.status(), this.heartbeatMs);
@@ -449,7 +487,7 @@ export class PhoneSync {
           this.status(step);
           if (!m.ok) { refuse(m, 'NoteX could not read this message.'); continue; }
           let files;
-          try { files = await this.messageFiles(device, xp, m); } catch (e) {
+          try { files = await this.messageFiles(device, root, m); } catch (e) {
             if (e instanceof PhoneError && e.code === 'stale') { refuse(m, e.message); continue; }
             throw e; // the cable, not the message
           }
@@ -464,16 +502,16 @@ export class PhoneSync {
     }
     // CanvasXP removes what was answered - NoteX cannot delete on the phone - told in every batch until it has.
     const done = new Set(this.data.handled);
-    const ids = outbox.filter((m) => done.has(m.id)).map((m) => m.id);
-    if (ids.length) ops.push({ op: 'answered', ids });
+    const items = queue.filter((m) => done.has(m.id)).map((m) => ({ id: m.id, dir: m.dir }));
+    if (items.length) ops.push({ op: 'answered', items });
   }
 
-  /* A message's files, each checked against the hash message.json gives. */
-  async messageFiles(device, xp, m) {
+  /* A message's attachments, each checked against the hash message.md gives. */
+  async messageFiles(device, root, m) {
     if (!m.files.length) return [];
     const t = this.tmp();
     try {
-      await this.transport.pull(device, [...xp, 'outbox', m.id, 'files'], m.files.map((f) => f.name), t);
+      await this.transport.pull(device, [...root, QUEUE_DIR, m.dir], m.files.map((f) => f.name), t);
       return m.files.map((f) => {
         let bytes = null;
         try { bytes = fs.readFileSync(path.join(t, f.name)); } catch (_) { /* missing */ }
