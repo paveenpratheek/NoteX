@@ -6,8 +6,14 @@
  *   device.json    written by its Setup: the phone's id and name;
  *   manifest.json  every file of every canvas with its SHA-256, refreshed
  *                  after each save, and the batches it has taken in;
- *   incoming/<id>/ what NoteX sends: files/<canvas>/<path> and, copied last,
- *                  changes.json saying what to write and delete.
+ *   incoming/<id>/ what NoteX sends: files/<canvas>/<path>, chats/<canvas>.json
+ *                  (an agent canvas's conversation) and, copied last,
+ *                  changes.json saying what to write and delete;
+ *   outbox/<id>/   a message written to the agent in CanvasXP's chat while
+ *                  away from the PC: files/ and, written last, message.json.
+ *                  NoteX answers them at the sync (t-e4196083e7);
+ *   status/        NoteX's steps while it syncs, a new file at each, which
+ *                  CanvasXP shows the user (t-2ff7b152e9).
  * NoteX never replaces or deletes anything on the phone - over File transfer
  * Windows asks before either - so it only adds batch folders, and CanvasXP,
  * which has full access to its folder, applies them once every hash checks.
@@ -28,6 +34,9 @@ import crypto from 'node:crypto';
 
 export const XP_DIR = '_canvasxp';
 const LOCK = '.fabric_lock';
+const HEARTBEAT_MS = 20_000; // a status at least this often while the agent works
+const KEEP_HANDLED = 500; // ids of messages answered, so none is answered twice
+const CANVAS_OPS = new Set(['copy', 'put', 'del', 'drop']);
 
 export class PhoneError extends Error {
   constructor(code, message) { super(message); this.name = 'PhoneError'; this.code = code; }
@@ -150,18 +159,26 @@ export function uniqueName(base, taken) {
 
 export class PhoneSync {
   /* transport talks to the phone (mtp.js); isOpen(dir) says whether CanvasX
-   * has a canvas open on the PC; keep(name) keeps a canvas in RAGX. */
-  constructor({ config, saveConfig, dataDir, transport, isOpen = () => false, keep = () => {}, log = () => {}, now = Date.now, hostname = os.hostname() }) {
-    Object.assign(this, { config, saveConfig, transport, isOpen, keep, log, now, hostname });
+   * has a canvas open on the PC; keep(name) keeps a canvas in RAGX;
+   * ask({canvas, text, model, files}) answers a message queued in CanvasXP's
+   * chat and resolves once the agent has (t-e4196083e7); chat(name) is an
+   * agent canvas's conversation, for CanvasXP to show. */
+  constructor({ config, saveConfig, dataDir, transport, isOpen = () => false, keep = () => {}, ask = null, chat = null, log = () => {}, now = Date.now, hostname = os.hostname(), heartbeatMs = HEARTBEAT_MS }) {
+    Object.assign(this, { config, saveConfig, transport, isOpen, keep, ask, chat, log, now, hostname, heartbeatMs });
     this.dir = path.join(dataDir, 'phone');
     this.stateFile = path.join(this.dir, 'state.json');
     this.running = null;
     this.last = null;
+    this.statusing = null;
     this.data = this.load();
   }
 
+  fresh(cache = {}) { return { id: null, base: {}, batches: [], cache, handled: [], chatSent: {} }; }
+
   load() {
-    try { return JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch (_) { return { id: null, base: {}, batches: [], cache: {} }; }
+    let d = {};
+    try { d = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch (_) { /* first sync */ }
+    return { ...this.fresh(), ...d };
   }
   save() {
     fs.mkdirSync(this.dir, { recursive: true });
@@ -204,7 +221,7 @@ export class PhoneSync {
     if (!Array.isArray(segs) || !segs.every((s) => typeof s === 'string' && s)) throw new PhoneError('bad-path', 'Give the folder on the phone as a list of folder names.');
     const d = await this.readJson(device, [...segs, XP_DIR], 'device.json');
     if (!d || !d.id) throw new PhoneError('not-canvasxp', 'That folder is not set up by CanvasXP - open CanvasXP on the phone, pick this folder and press Set up USB sync there first.');
-    if (this.data.id !== d.id) this.data = { id: d.id, base: {}, batches: [], cache: this.data.cache || {} };
+    if (this.data.id !== d.id) this.data = { ...this.fresh(this.data.cache || {}), id: d.id };
     this.config.phone = { device, path: segs, id: d.id, name: d.name || 'Phone', setAt: new Date(this.now()).toISOString() };
     this.saveConfig();
     this.save();
@@ -214,7 +231,7 @@ export class PhoneSync {
   forget() {
     delete this.config.phone;
     this.saveConfig();
-    this.data = { id: null, base: {}, batches: [], cache: this.data.cache || {} };
+    this.data = this.fresh(this.data.cache || {});
     this.save();
     this.last = null;
   }
@@ -225,6 +242,28 @@ export class PhoneSync {
       .then((r) => { this.last = r; return r; }, (e) => { this.last = { ok: false, at: new Date(this.now()).toISOString(), error: e.message, code: e.code || null }; return this.last; })
       .finally(() => { this.running = null; this.progress = null; });
     return this.running;
+  }
+
+  /* A status file for CanvasXP, which shows the user what the sync is doing
+   * (t-2ff7b152e9): a new file at every step, never one rewritten, since
+   * Windows asks before replacing a file on the phone (t-87e7049e0f). With
+   * no fields it repeats the last step - the heartbeat while the agent
+   * works. A status that cannot be written never stops the sync. */
+  status(fields = null) {
+    const s = this.statusing;
+    if (!s) return Promise.resolve();
+    if (fields) s.fields = fields;
+    const seq = ++s.seq;
+    const body = { sync: s.id, seq, at: new Date(this.now()).toISOString(), from: this.hostname, ...s.fields };
+    s.chain = s.chain.then(async () => {
+      const t = this.tmp();
+      try {
+        const f = path.join(t, `${s.id}-${String(seq).padStart(5, '0')}.json`);
+        fs.writeFileSync(f, JSON.stringify(body));
+        await this.transport.push(s.device, f, [...s.xp, 'status']);
+      } catch (e) { this.log(`Could not tell the phone how the sync goes: ${e.message}`); } finally { fs.rmSync(t, { recursive: true, force: true }); }
+    });
+    return s.chain;
   }
 
   async run() {
@@ -242,6 +281,22 @@ export class PhoneSync {
     this.progress = 'Reading what the phone has';
     const dev = await this.readJson(device, xp, 'device.json');
     if (!dev || dev.id !== phone.id) throw new PhoneError('not-canvasxp', `The folder ${root.join(' > ')} on the phone is not the CanvasXP folder NoteX was set up with - set the phone up again.`);
+    const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, '-');
+    const top = await this.transport.list(device, xp);
+    for (const f of ['incoming', 'status']) if (!top.some((i) => i.folder && i.name === f)) await this.transport.mkdir(device, xp, f);
+    this.statusing = { id: `s-${stamp}`, seq: 0, device, xp, chain: Promise.resolve(), fields: null };
+    this.status({ stage: 'reading', text: 'NoteX is reading your canvases' });
+    try {
+      const result = await this.exchange({ device, root, xp, ws, stamp, top });
+      await this.status({ stage: 'done', text: summaryOf(result), batch: result.batch });
+      return result;
+    } catch (e) {
+      await this.status({ stage: 'failed', text: e.message });
+      throw e;
+    } finally { this.statusing = null; }
+  }
+
+  async exchange({ device, root, xp, ws, stamp, top }) {
     const manifest = await this.readJson(device, xp, 'manifest.json');
     if (!manifest) throw new PhoneError('no-manifest', 'CanvasXP has not listed its canvases yet - open CanvasXP on the phone once, then sync again.');
     const { canvases: listed, skipped } = phoneCanvases(manifest);
@@ -258,19 +313,25 @@ export class PhoneSync {
       return false;
     });
     for (const b of lost) for (const op of b.ops) {
+      if (op.op === 'chat') { delete this.data.chatSent[op.canvas]; continue; }
+      if (!CANVAS_OPS.has(op.op)) continue;
       for (const c of [op.canvas, op.to].filter(Boolean)) { if (listed[c]) this.data.base[c] = { ...listed[c] }; else delete this.data.base[c]; }
     }
     const F = overlay(listed, this.data.batches);
+    const result = { ok: true, at: null, pulled: [], pushed: [], conflicts: [], removed: [], open: [], stale: [], skipped, answered: [], unanswered: [] };
+    const ops = [];
+
+    // Messages queued in CanvasXP's chat go to the agent first, so what it changes goes back in this batch.
+    const outbox = top.some((i) => i.folder && i.name === 'outbox') ? await this.readOutbox(device, xp) : [];
+    await this.answer(device, xp, outbox, result, ops);
 
     this.progress = 'Reading the workspace';
+    this.status({ stage: 'reading', text: 'NoteX is comparing the canvases' });
     const pc = scanPc(ws, this.data.cache, this.isOpen);
     const base = this.data.base;
     const names = new Set([...Object.keys(pc), ...Object.keys(F), ...Object.keys(base)]);
     const taken = new Set([...Object.keys(pc), ...Object.keys(F)]);
-    const result = { ok: true, at: null, pulled: [], pushed: [], conflicts: [], removed: [], open: [], stale: [], skipped };
-    const ops = [];
     const sendFiles = []; // [canvas, rel]
-    const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, '-');
 
     const push = (name, P, Fc) => {
       for (const [rel, sha] of Object.entries(P)) {
@@ -324,16 +385,102 @@ export class PhoneSync {
       this.keepIt(copy, null);
     }
 
+    // Each agent canvas the phone has goes with its conversation, when that changed.
+    const extras = []; // [path in the batch, text]
+    if (this.chat) {
+      for (const [name, c] of Object.entries(pc)) {
+        if (!c.agent || !(F[name] || result.pushed.includes(name))) continue;
+        let body;
+        try { body = JSON.stringify(this.chat(name)); } catch (e) { this.log(`Could not read ${name}'s chat: ${e.message}`); continue; }
+        const sha = sha256(Buffer.from(body));
+        if (this.data.chatSent[name] === sha) continue;
+        ops.push({ op: 'chat', canvas: name, sha });
+        extras.push([`chats/${name}.json`, body]);
+        this.data.chatSent[name] = sha;
+      }
+    }
+
     // Always a batch, even an empty one: it tells CanvasXP when it last met this PC.
     const id = `b-${stamp}-${crypto.randomBytes(3).toString('hex')}`;
     this.progress = sendFiles.length ? `Sending ${sendFiles.length} file${sendFiles.length === 1 ? '' : 's'} to the phone` : 'Telling the phone it is up to date';
-    await this.send(device, xp, id, ws, ops, sendFiles);
+    this.status({ stage: 'sending', text: sendFiles.length ? `NoteX is sending ${sendFiles.length} file${sendFiles.length === 1 ? '' : 's'} from the PC` : 'NoteX is finishing up' });
+    await this.send(device, xp, id, ws, ops, sendFiles, extras);
     if (ops.length) this.data.batches.push({ id, ops: ops.map((o) => (o.op === 'drop' ? { op: 'drop', canvas: o.canvas } : o)) });
     this.save();
     result.at = new Date(this.now()).toISOString();
     result.batch = id;
-    this.log(`Phone sync: ${result.pulled.length} in, ${result.pushed.length} out, ${result.conflicts.length} side by side${result.open.length ? `, ${result.open.length} open in CanvasX` : ''}.`);
+    this.log(`Phone sync: ${result.pulled.length} in, ${result.pushed.length} out, ${result.conflicts.length} side by side${result.answered.length ? `, ${result.answered.length} message${result.answered.length === 1 ? '' : 's'} answered` : ''}${result.open.length ? `, ${result.open.length} open in CanvasX` : ''}.`);
     return result;
+  }
+
+  /* The messages in CanvasXP's outbox, oldest first: each a folder holding
+   * files/ and, written last, message.json - one without it is still being
+   * written and waits. */
+  async readOutbox(device, xp) {
+    let ids = [];
+    try { ids = (await this.transport.list(device, [...xp, 'outbox'])).filter((i) => i.folder && safeSegment(i.name)).map((i) => i.name).sort(); } catch (_) { return []; }
+    const out = [];
+    for (const id of ids) {
+      const msg = await this.readJson(device, [...xp, 'outbox', id], 'message.json');
+      if (!msg) continue;
+      const files = Array.isArray(msg.files) ? msg.files : [];
+      const ok = safeCanvas(msg.canvas) && typeof (msg.text ?? '') === 'string' && files.every((f) => f && safeSegment(f.name) && /^[0-9a-f]{64}$/.test(f.sha));
+      out.push({ id, ok, canvas: msg.canvas, text: String(msg.text || ''), model: typeof msg.model === 'string' ? msg.model : null, files: ok ? files : [] });
+    }
+    return out;
+  }
+
+  /* Each queued message not yet answered goes to the agent, one after
+   * another (t-e4196083e7). One the agent saw is handled, whatever it
+   * answered; one refused before it - not the agent's canvas, a file it
+   * cannot take - stays queued with the reason (t-957b09f2fe). */
+  async answer(device, xp, outbox, result, ops) {
+    const handled = new Set(this.data.handled);
+    const todo = outbox.filter((m) => !handled.has(m.id));
+    const refuse = (m, error) => { result.unanswered.push({ id: m.id, canvas: m.canvas, error }); ops.push({ op: 'unanswered', id: m.id, error }); };
+    if (todo.length && !this.ask) for (const m of todo) refuse(m, 'NoteX here cannot run the agent.');
+    else if (todo.length) {
+      const beat = setInterval(() => this.status(), this.heartbeatMs);
+      try {
+        for (let i = 0; i < todo.length; i++) {
+          const m = todo[i];
+          const step = { stage: 'agent', text: `The agent is answering your message${todo.length === 1 ? '' : 's'}`, done: i, total: todo.length, current: m.id, canvas: m.canvas };
+          this.progress = `The agent is answering message ${i + 1} of ${todo.length} from the phone (${m.canvas})`;
+          this.status(step);
+          if (!m.ok) { refuse(m, 'NoteX could not read this message.'); continue; }
+          let files;
+          try { files = await this.messageFiles(device, xp, m); } catch (e) {
+            if (e instanceof PhoneError && e.code === 'stale') { refuse(m, e.message); continue; }
+            throw e; // the cable, not the message
+          }
+          let r;
+          try { r = await this.ask({ canvas: m.canvas, text: m.text, model: m.model, files }); } catch (e) { refuse(m, e.message); continue; }
+          this.data.handled = [...this.data.handled, m.id].slice(-KEEP_HANDLED);
+          this.save();
+          result.answered.push({ id: m.id, canvas: m.canvas, status: (r && r.status) || 'answered' });
+        }
+        this.status({ stage: 'agent', text: `The agent answered your message${todo.length === 1 ? '' : 's'}`, done: todo.length, total: todo.length });
+      } finally { clearInterval(beat); }
+    }
+    // CanvasXP removes what was answered - NoteX cannot delete on the phone - told in every batch until it has.
+    const done = new Set(this.data.handled);
+    const ids = outbox.filter((m) => done.has(m.id)).map((m) => m.id);
+    if (ids.length) ops.push({ op: 'answered', ids });
+  }
+
+  /* A message's files, each checked against the hash message.json gives. */
+  async messageFiles(device, xp, m) {
+    if (!m.files.length) return [];
+    const t = this.tmp();
+    try {
+      await this.transport.pull(device, [...xp, 'outbox', m.id, 'files'], m.files.map((f) => f.name), t);
+      return m.files.map((f) => {
+        let bytes = null;
+        try { bytes = fs.readFileSync(path.join(t, f.name)); } catch (_) { /* missing */ }
+        if (!bytes || sha256(bytes) !== f.sha) throw new PhoneError('stale', `${f.name} on the phone is not whole yet - it is tried again at the next sync.`);
+        return { name: f.name, bytes };
+      });
+    } finally { fs.rmSync(t, { recursive: true, force: true }); }
   }
 
   keepIt(name, pcCanvas) {
@@ -390,8 +537,9 @@ export class PhoneSync {
   }
 
   /* A batch onto the phone: its files first, then changes.json, which
-   * CanvasXP waits for before it takes anything in. */
-  async send(device, xp, id, ws, ops, files) {
+   * CanvasXP waits for before it takes anything in. extras are files of the
+   * batch itself, such as an agent canvas's chat. */
+  async send(device, xp, id, ws, ops, files, extras = []) {
     const t = this.tmp();
     try {
       const dir = path.join(t, id);
@@ -401,12 +549,28 @@ export class PhoneSync {
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.copyFileSync(path.join(ws, canvas, ...rel.split('/')), target);
       }
-      const items = await this.transport.list(device, xp);
-      if (!items.some((i) => i.folder && i.name === 'incoming')) await this.transport.mkdir(device, xp, 'incoming');
+      for (const [rel, text] of extras) {
+        const target = path.join(dir, ...rel.split('/'));
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, text);
+      }
       await this.transport.push(device, dir, [...xp, 'incoming']);
       const changes = path.join(t, 'changes.json');
       fs.writeFileSync(changes, JSON.stringify({ id, at: new Date(this.now()).toISOString(), from: this.hostname, ops }, null, 2));
       await this.transport.push(device, changes, [...xp, 'incoming', id]);
     } finally { fs.rmSync(t, { recursive: true, force: true }); }
   }
+}
+
+/* What CanvasXP's popup says once a sync is done. */
+export function summaryOf(r) {
+  const n = (k, one, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+  const parts = [];
+  if (r.answered.length) parts.push(`${n(r.answered.length, 'message')} answered`);
+  if (r.unanswered.length) parts.push(`${n(r.unanswered.length, 'message')} not answered`);
+  if (r.pulled.length) parts.push(`${n(r.pulled.length, 'canvas', 'canvases')} to the PC`);
+  if (r.pushed.length) parts.push(`${n(r.pushed.length, 'canvas', 'canvases')} from the PC`);
+  if (r.conflicts.length) parts.push(`${n(r.conflicts.length, 'canvas', 'canvases')} changed on both, both kept`);
+  if (r.removed.length) parts.push(`${n(r.removed.length, 'canvas', 'canvases')} deleted`);
+  return parts.length ? parts.join(' · ') : 'Already up to date';
 }

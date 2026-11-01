@@ -42,7 +42,7 @@ import { Bronze, BronzeError } from './bronze.js';
 import { AgentCanvases, isAgentCanvas } from './agentcanvas.js';
 import { Refusal } from './layout.js';
 import { Placer } from './placer.js';
-import { Arranger, MODELS } from './arranger.js';
+import { Arranger, MODELS, ASK_MAX } from './arranger.js';
 import { DropSync } from './dropsync.js';
 import { forgetDrop } from './forget.js';
 import { PhoneSync, PhoneError } from './phone.js';
@@ -185,10 +185,37 @@ export async function startServer({
   /* The phone over the USB cable: CanvasXP's folder there and the workspace
    * kept the same; what comes from the phone is kept in RAGX (t-71306596ff,
    * t-76fdccd60b). */
+  /* Files attached to a chat message: drops of the canvas, landed as placing
+   * so the placer leaves them to the chat agent (t-79ac13d22a). */
+  const landChatDrops = (name, ask, parts, via) => {
+    const send = 's-' + crypto.randomBytes(5).toString('hex');
+    return parts.map((part) => {
+      const d = bronze.land({ ...part, ask: ask || null, send, canvas: name, via });
+      bronze.mark(d.id, 'placing', 'The agent in the chat is placing it.');
+      return d.id;
+    });
+  };
   const phone = new PhoneSync({
     config, saveConfig, dataDir: dir, log, transport: syncOptions.phoneTransport || new ShellTransport(),
     isOpen: (fdir) => writer.isOpen(fdir),
     keep: (name) => { if (!(config.sync && config.sync[name])) sync.set(name, true); },
+    /* A message queued in CanvasXP's chat, answered at the sync as one from
+     * CanvasX's chat would be (t-e4196083e7). Everything that can refuse it
+     * is checked before its files land, so a refused one leaves nothing. */
+    ask: async ({ canvas, text, model, files }) => {
+      if (!isAgentCanvas(fabricDir(needWorkspace(), canvas))) throw new Refusal(`${canvas} is not assigned to the agent on the PC any more.`);
+      if (text.length > ASK_MAX) throw new Refusal(`A message to the agent can be at most ${ASK_MAX} characters.`);
+      if (!text.trim() && !files.length) throw new Refusal('The message is empty.');
+      for (const f of files) {
+        if (f.bytes.length > MAX_DROP) throw new Refusal(`${f.name} is over ${Math.round(MAX_DROP / 1024 / 1024)} MB.`);
+        bronze.prepare({ bytes: f.bytes, name: f.name });
+      }
+      while (arranger.running) await arranger.running.done.catch(() => {});
+      const drops = landChatDrops(canvas, text, files, 'canvasxp');
+      return arranger.askAndWait(canvas, text, MODELS.includes(model) ? model : null, { source: 'canvasxp', drops });
+    },
+    // What CanvasXP shows in an agent canvas's chat: the conversation NoteX keeps.
+    chat: (name) => ({ name, chat: agent.chat(name, 100), model: arranger.model(), models: MODELS }),
   });
 
   /* The canvases assigned to the agent: those whose folder holds the
@@ -553,12 +580,7 @@ export async function startServer({
       if (!parts.length) throw new HttpError(400, 'empty', 'Attach a file or an image - words alone go with the chat\'s Send.');
       if (ask.length > MAX_ASK) throw new HttpError(413, 'too-large', `A message to the agent can be at most ${MAX_ASK} characters.`);
       if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
-      const send = 's-' + crypto.randomBytes(5).toString('hex');
-      const ids = parts.map((part) => {
-        const d = bronze.land({ ...part, ask: ask || null, send, canvas: name, via: 'canvasx' });
-        bronze.mark(d.id, 'placing', 'The agent in the chat is placing it.');
-        return d.id;
-      });
+      const ids = landChatDrops(name, ask, parts, 'canvasx');
       const job = arranger.ask(name, ask, model, { source: 'canvasx', drops: ids });
       if (model !== undefined) { config.arranger = { ...(config.arranger || {}), model }; saveConfig(); }
       return json(202, { ask: job, drops: ids });

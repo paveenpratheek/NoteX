@@ -75,6 +75,9 @@ function xpApply(phone) {
       if (op.op === 'put') { fs.mkdirSync(path.dirname(path.join(phone, op.canvas, op.path)), { recursive: true }); fs.copyFileSync(path.join(b, 'files', op.canvas, op.path), path.join(phone, op.canvas, op.path)); }
       if (op.op === 'del') fs.rmSync(path.join(phone, op.canvas, op.path), { force: true });
       if (op.op === 'drop') fs.rmSync(path.join(phone, op.canvas), { recursive: true, force: true });
+      if (op.op === 'chat') write(phone, `${XP_DIR}/chats/${op.canvas}.json`, fs.readFileSync(path.join(b, 'chats', `${op.canvas}.json`)));
+      if (op.op === 'answered') for (const id of op.ids) fs.rmSync(path.join(phone, XP_DIR, 'outbox', id), { recursive: true, force: true });
+      if (op.op === 'unanswered' && fs.existsSync(path.join(phone, XP_DIR, 'outbox', op.id))) write(phone, `${XP_DIR}/outbox/${op.id}/error.json`, JSON.stringify({ error: op.error }));
     }
     fs.rmSync(b, { recursive: true });
   }
@@ -329,4 +332,132 @@ test('the engine: browse to the phone\'s folder, set it up, sync, and the canvas
   assert.ok(st.sync.Trip, 'Trip is kept in RAGX');
   assert.equal(st.phone.setup.name, 'My phone');
   assert.equal((await call('DELETE', '/api/phone')).body.setup, null);
+});
+
+/* CanvasXP's chat on an agent canvas: a message kept in the outbox, files first. */
+function xpQueue(phone, id, canvas, text, files = []) {
+  for (const [name, bytes] of files) write(phone, `${XP_DIR}/outbox/${id}/files/${name}`, bytes);
+  write(phone, `${XP_DIR}/outbox/${id}/message.json`, JSON.stringify({ id, canvas, text, model: 'haiku', at: '2026-11-01T10:00:00Z', files: files.map(([name, bytes]) => ({ name, size: bytes.length, sha: sha(bytes) })) }));
+}
+const statuses = (phone) => {
+  const d = path.join(phone, XP_DIR, 'status');
+  return fs.existsSync(d) ? fs.readdirSync(d).sort().map((f) => JSON.parse(fs.readFileSync(path.join(d, f), 'utf8'))) : [];
+};
+const lastBatch = (phone) => {
+  const inc = path.join(phone, XP_DIR, 'incoming');
+  const id = fs.readdirSync(inc).sort().pop();
+  return JSON.parse(fs.readFileSync(path.join(inc, id, 'changes.json'), 'utf8'));
+};
+
+test('messages queued in CanvasXP\'s chat are answered at the sync, the agent\'s changes and the chat go back, and status files say how it goes (t-e4196083e7, t-957b09f2fe, t-2ff7b152e9)', async (t) => {
+  const s = setup(t);
+  xpSetup(s.phone);
+  write(s.ws, 'Board/fabric.json', '{"v":1}');
+  write(s.ws, 'Board/agent.json', '{}');
+  write(s.ws, 'Notes/fabric.json', '{"n":1}');
+  xpManifest(s.phone);
+  const turns = [];
+  const asked = [];
+  const ask = async (m) => {
+    asked.push(m);
+    if (m.canvas !== 'Board') throw new Error(`${m.canvas} is not assigned to the agent on the PC any more.`);
+    await new Promise((r) => setTimeout(r, 60)); // the agent at work: heartbeats go out meanwhile
+    write(s.ws, 'Board/fabric.json', `{"v":${asked.length + 1}}`);
+    turns.push({ who: 'user', text: m.text }, { who: 'agent', text: 'Placed.' });
+    return { status: 'done' };
+  };
+  const sync = new PhoneSync({ config: s.config, saveConfig: () => {}, dataDir: s.data, transport: s.transport, keep: () => {}, hostname: 'DESK', ask, chat: (name) => ({ name, chat: turns, model: 'sonnet', models: ['sonnet'] }), heartbeatMs: 15 });
+  await sync.setup(DEVICE, ROOT);
+  let r = await sync.sync();
+  assert.deepEqual(r.pushed, ['Board', 'Notes'], r.error);
+  xpApply(s.phone);
+  assert.deepEqual(JSON.parse(read(s.phone, `${XP_DIR}/chats/Board.json`)).chat, [], 'the agent canvas went with its chat');
+
+  const PNG = Buffer.from('\x89PNG fake');
+  xpQueue(s.phone, 'm-1', 'Board', 'put the photo by the plan', [['beach.png', PNG]]);
+  xpQueue(s.phone, 'm-2', 'Notes', 'tidy this');
+  write(s.phone, `${XP_DIR}/outbox/m-3/files/half.jpg`, 'still writing'); // no message.json yet
+  fs.rmSync(path.join(s.phone, XP_DIR, 'status'), { recursive: true, force: true });
+  r = await sync.sync();
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.answered, [{ id: 'm-1', canvas: 'Board', status: 'done' }]);
+  assert.deepEqual(r.unanswered.map((u) => [u.id, u.error]), [['m-2', 'Notes is not assigned to the agent on the PC any more.']]);
+  assert.equal(asked[0].text, 'put the photo by the plan');
+  assert.equal(asked[0].model, 'haiku');
+  assert.deepEqual(asked[0].files.map((f) => [f.name, f.bytes.equals(PNG)]), [['beach.png', true]]);
+  assert.deepEqual(r.pushed, ['Board'], 'what the agent changed goes back in the same sync');
+  const b = lastBatch(s.phone);
+  assert.deepEqual(b.ops.find((o) => o.op === 'answered'), { op: 'answered', ids: ['m-1'] });
+  assert.ok(b.ops.some((o) => o.op === 'unanswered' && o.id === 'm-2'));
+  assert.ok(b.ops.some((o) => o.op === 'chat' && o.canvas === 'Board'));
+  const st = statuses(s.phone);
+  assert.ok(st.every((x) => x.sync === st[0].sync) && st.map((x) => x.seq).join() === st.map((_, i) => i + 1).join(), 'one sync, numbered in order');
+  assert.equal(st[0].stage, 'reading');
+  const agent = st.filter((x) => x.stage === 'agent');
+  assert.deepEqual([agent[0].done, agent[0].total, agent[0].current], [0, 2, 'm-1']);
+  assert.ok(agent.filter((x) => x.current === 'm-1').length >= 2, 'heartbeats while the agent worked');
+  assert.deepEqual([agent.at(-1).done, agent.at(-1).total], [2, 2]);
+  assert.deepEqual([st.at(-1).stage, st.at(-1).batch, st.at(-1).text], ['done', r.batch, '1 message answered · 1 message not answered · 1 canvas from the PC']);
+
+  // Not taken in yet: the next sync does not answer m-1 again, and still tells the phone to remove it.
+  r = await sync.sync();
+  assert.equal(asked.filter((m) => m.canvas === 'Board').length, 1, 'answered once');
+  assert.deepEqual(lastBatch(s.phone).ops.find((o) => o.op === 'answered'), { op: 'answered', ids: ['m-1'] });
+  xpApply(s.phone);
+  assert.ok(!fs.existsSync(path.join(s.phone, XP_DIR, 'outbox', 'm-1')), 'the answered message is gone from the phone');
+  assert.match(read(s.phone, `${XP_DIR}/outbox/m-2/error.json`), /not assigned/);
+  assert.ok(fs.existsSync(path.join(s.phone, XP_DIR, 'outbox', 'm-3')), 'half a message waits');
+  assert.equal(JSON.parse(read(s.phone, `${XP_DIR}/chats/Board.json`)).chat.length, 2);
+  assert.equal(read(s.phone, 'Board/fabric.json'), '{"v":2}');
+  r = await sync.sync();
+  assert.ok(!lastBatch(s.phone).ops.some((o) => o.op === 'chat' || o.op === 'answered'), 'nothing new to say');
+});
+
+test('a sync that fails tells the phone so', async (t) => {
+  const s = setup(t);
+  xpSetup(s.phone);
+  const sync = s.make();
+  await sync.setup(DEVICE, ROOT);
+  const r = await sync.sync(); // no manifest yet
+  assert.equal(r.ok, false);
+  const st = statuses(s.phone);
+  assert.deepEqual(st.map((x) => x.stage), ['reading', 'failed']);
+  assert.match(st[1].text, /has not listed its canvases/);
+});
+
+test('the engine answers a queued message through the arranger, with its files kept as drops of the canvas and placed', async (t) => {
+  const { startServer } = await import('../engine/lib/server.js');
+  const s = setup(t);
+  xpSetup(s.phone);
+  write(s.ws, 'Board/fabric.json', JSON.stringify({ areas: [], files: [], drawings: [], totems: [], links: [] }));
+  write(s.ws, 'Board/agent.json', '{}');
+  write(s.data, 'config.json', JSON.stringify({ workspace: s.ws, placing: false, ragx: path.join(s.tmp, 'no-ragx') }));
+  xpManifest(s.phone);
+  const PDF = Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n');
+  xpQueue(s.phone, 'm-1', 'Board', 'file the survey', [['survey.pdf', PDF]]);
+  const prompts = [];
+  const arrangerRun = async (req) => {
+    prompts.push(req);
+    const ids = [...new Set([...req.prompt.matchAll(/- id: (d-[0-9a-f]{10})/g)].map((m) => m[1]))];
+    return { text: `Filed it.\n\`\`\`xml\n<Canvas name="Board"><Totem name="Inbox">${ids.map((id) => `<File drop="${id}"/>`).join('')}</Totem></Canvas>\n\`\`\`` };
+  };
+  const srv = await startServer({ dataDir: s.data, port: 0, runtimeFile: path.join(s.tmp, 'plugin', 'runtime.json'), log: () => {}, signals: false, syncOptions: { phoneTransport: s.transport, arrangerRun } });
+  t.after(() => srv.stop());
+  const call = async (method, p, body) => {
+    const r = await fetch(srv.url + p, { method, headers: { 'x-notex-token': srv.token, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    return { status: r.status, body: await r.json() };
+  };
+  assert.equal((await call('PUT', '/api/phone', { device: DEVICE, path: ROOT })).status, 200);
+  assert.equal((await call('POST', '/api/phone/sync')).status, 202);
+  let rep;
+  for (let i = 0; i < 200; i++) { rep = (await call('GET', '/api/phone')).body; if (!rep.running && rep.last) break; await new Promise((r) => setTimeout(r, 20)); }
+  assert.equal(rep.last.ok, true, rep.last.error);
+  assert.deepEqual(rep.last.answered, [{ id: 'm-1', canvas: 'Board', status: 'done' }]);
+  assert.equal(prompts[0].model, 'haiku');
+  const drop = (await call('GET', '/api/inbox')).body.drops.find((d) => d.name === 'survey.pdf');
+  assert.deepEqual([drop.status, drop.canvas, drop.ask, drop.via], ['placed', 'Board', 'file the survey', 'canvasxp']);
+  const chat = JSON.parse(fs.readFileSync(path.join(s.phone, XP_DIR, 'incoming', rep.last.batch, 'chats', 'Board.json'), 'utf8'));
+  assert.deepEqual(chat.chat.map((c) => [c.who, c.source || null]), [['user', 'canvasxp'], ['agent', null]]);
+  assert.equal(chat.chat[1].text, 'Filed it.');
+  assert.ok(rep.last.pushed.includes('Board'), 'the canvas the agent drew goes to the phone');
 });

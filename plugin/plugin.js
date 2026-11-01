@@ -886,6 +886,10 @@ function renderPhone(r) {
     li.append(el('span', 'when', label), el('span', null, list(names)));
     ul.append(li);
   };
+  // Messages queued in CanvasXP's chat, answered by the agent at this sync (t-e4196083e7).
+  const perCanvas = (ms) => Object.entries((ms || []).reduce((m, a) => ({ ...m, [a.canvas]: (m[a.canvas] || 0) + 1 }), {})).map(([c, k]) => (k > 1 ? `${c} (${k})` : c));
+  row('Answered from the phone', perCanvas(last.answered));
+  row('Not answered', (last.unanswered || []).map((u) => `${u.canvas}: ${u.error}`), true);
   row('In from the phone', last.pulled);
   row('Out to the phone', last.pushed);
   row('Changed on both', last.conflicts);
@@ -896,6 +900,7 @@ function renderPhone(r) {
   if (!ul.children.length) ul.append(el('li', null, 'Nothing to do: the phone and the PC already agree.'));
   if (last.open && last.open.length) ul.append(el('li', 'note', 'Canvases open in CanvasX on the PC wait for the next sync - go to CanvasX\'s home screen and sync again.'));
   if (last.stale && last.stale.length) ul.append(el('li', 'note', 'Those changed on the phone after CanvasXP listed them: open CanvasXP on the phone once, then sync again.'));
+  if (last.unanswered && last.unanswered.length) ul.append(el('li', 'note', 'Those stay queued on the phone and are tried again at the next sync - or remove them in the chat in CanvasXP.'));
   if (last.conflicts && last.conflicts.length) ul.append(el('li', 'note', 'Both kept: the PC\'s version under its own name, the phone\'s beside it, on the PC and on the phone.'));
 }
 

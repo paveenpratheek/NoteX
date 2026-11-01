@@ -201,6 +201,16 @@ export class Arranger {
     return this.report(canvas);
   }
 
+  /* An ask whose answer is waited for: the messages queued on the phone,
+   * answered one after another at a USB sync (t-e4196083e7). An ask already
+   * running - from CanvasX's chat, say - is waited for first. */
+  async askAndWait(canvas, words, model = null, opts = {}) {
+    while (this.running) await this.running.done.catch(() => {});
+    this.ask(canvas, words, model, opts);
+    await this.jobs.get(canvas).done;
+    return this.report(canvas);
+  }
+
   /* status: answered (words only), done (and the canvas changed) or failed. */
   finish(job, status, detail, totems = [], reply = null) {
     Object.assign(job, { status, detail, reply, totems, doneAt: this.at() });
