@@ -10,8 +10,13 @@
  * are drawn in one render, so they land together or not at all
  * (t-b5d4a34951). A refused answer is asked for once more with the reason.
  *
- * One ask at a time. A totem cannot be deleted or renamed by an ask: one the
- * answer leaves out stays as it is. An ask refused twice, or stopped by
+ * One ask at a time. A totem cannot be renamed by an ask: one the answer
+ * leaves out stays as it is. What the user asks to delete can go
+ * (t-44045fd69e): a whole totem by <Delete totem>, or items left out of a
+ * totem's script and each named in a <Delete> tag; anything else lost is
+ * still refused, and so is any deleting the user's message did not ask for.
+ * What goes stays recoverable: the totem's script among its versions, a
+ * drop back in the Inbox (t-dbfe16a2b9). An ask refused twice, or stopped by
  * Claude being logged out or at a limit, is reported and not tried again by
  * itself (t-6077adde73).
  *
@@ -59,40 +64,89 @@ export function replyOf(text) {
 
 /* What a totem holds that an arrangement must keep, wherever it moves:
  * drops by id, a note's words (its name when it has none), texts and files.
- * Boxes, names and wires may change. */
-export function heldItems(parsed) {
+ * Boxes, names and wires may change. With details: what each is, to match
+ * against what the agent says it deleted. */
+export function heldDetails(parsed) {
   const out = [];
   const visit = (node) => {
     for (const c of node.children || []) {
       const a = c.attrs || {};
-      if (a.drop) out.push(`drop ${a.drop}`);
-      else if (c.tag === 'Note') out.push(`the note "${norm(c.text) ? String(c.text).trim() : a.name}"`);
-      else if (c.tag === 'Text') out.push(`the text "${String(c.text || '').trim()}"`);
-      else if (c.tag === 'File') out.push(`the file ${a.path}`);
+      if (a.drop) out.push({ key: `drop ${a.drop}`, drop: a.drop, name: a.name || null });
+      else if (c.tag === 'Note') out.push({ key: `the note "${norm(c.text) ? String(c.text).trim() : a.name}"`, note: a.name || '', words: String(c.text || '') });
+      else if (c.tag === 'Text') out.push({ key: `the text "${String(c.text || '').trim()}"`, text: String(c.text || '') });
+      else if (c.tag === 'File') out.push({ key: `the file ${a.path}`, file: String(a.path || '') });
       // An image the agent drew is kept by its name; its SVG may be redrawn (t-1e8cdd344a).
-      else if (c.tag === 'Image') out.push(`the image "${a.name}"`);
+      else if (c.tag === 'Image') out.push({ key: `the image "${a.name}"`, image: a.name || '' });
       visit(c);
     }
   };
   visit(parsed.totem);
   return out;
 }
+export const heldItems = (parsed) => heldDetails(parsed).map((d) => d.key);
+
+/* The words of a user's message that ask for something to go (t-44045fd69e). */
+const ASKS_DELETE = /\b(delete|deleting|remove|removing|erase|clear|clean ?up|get rid|discard|trash|throw (it |them |that |those )?away|wipe|take (it |them |that |those )?(off|out|away)|drop (it|them|that|those|the))\b/i;
+export const asksToDelete = (words) => ASKS_DELETE.test(String(words || ''));
+
+const unxml = (s) => String(s).replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+/* The <Delete> tags of an answer, each in a ```xml block beside the
+ * scripts: [{ kind: totem|note|text|drop|image|file, value }], or why they
+ * cannot be read. */
+export function extractDeletes(text, canvas) {
+  const out = [];
+  const fence = /```[a-z]*\s*\n([\s\S]*?)```/gi;
+  for (let m; (m = fence.exec(String(text)));) {
+    if (!/<Delete\b/i.test(m[1])) continue;
+    const named = /<Canvas\s+name\s*=\s*"([^"]*)"/i.exec(m[1]);
+    if (named && norm(unxml(named[1])) !== norm(canvas)) return { reason: `a <Delete> block is for the canvas "${unxml(named[1])}", but this is "${canvas}".` };
+    if (/<Totem\b/i.test(m[1])) return { reason: 'put <Delete> tags in a block of their own, apart from the totem scripts.' };
+    for (const t of m[1].matchAll(/<Delete\s+([a-z]+)\s*=\s*("([^"]*)"|'([^']*)')\s*\/?>/gi)) {
+      const kind = t[1].toLowerCase();
+      if (!['totem', 'note', 'text', 'drop', 'image', 'file'].includes(kind)) return { reason: `<Delete ${t[1]}="..."> is not one NoteX knows - use totem, note, text, drop, image or file.` };
+      const value = unxml(t[3] ?? t[4] ?? '').trim();
+      if (value) out.push({ kind, value });
+    }
+  }
+  return { deletes: out };
+}
+
+/* Whether a deletion names this item: a drop by id, a note by its name or
+ * its first words, a text, image or file by its words, name or file name. */
+function namedBy(del, item) {
+  const v = norm(del.value);
+  const starts = (s) => v.length >= 3 && norm(s).startsWith(v);
+  switch (del.kind) {
+    case 'drop': return Boolean(item.drop) && item.drop === del.value;
+    case 'note': return item.note !== undefined ? norm(item.note) === v || starts(item.words) : Boolean(item.drop && item.name && norm(item.name) === v);
+    case 'text': return item.text !== undefined && (norm(item.text) === v || starts(item.text));
+    case 'image': return item.image !== undefined && norm(item.image) === v;
+    case 'file': return item.file !== undefined && (norm(item.file) === v || norm(item.file.split(/[\\/]/).pop()) === v);
+    default: return false;
+  }
+}
 
 const counts = (list) => list.reduce((m, k) => m.set(k, (m.get(k) || 0) + 1), new Map());
 
-/* Every script in a model's answer: each ```xml block holding a <Canvas>. */
+/* Every script in a model's answer: each ```xml block holding a <Canvas>,
+ * but not the blocks of <Delete> tags. */
 export function extractScripts(text) {
   const out = [];
   const fence = /```[a-z]*\s*\n([\s\S]*?)```/gi;
-  for (let m; (m = fence.exec(String(text)));) if (/<Canvas/i.test(m[1])) out.push(m[1].trim());
+  for (let m; (m = fence.exec(String(text)));) if (/<Canvas/i.test(m[1]) && !/<Delete\b/i.test(m[1])) out.push(m[1].trim());
   return out;
 }
 
 /* The scripts of an answer as overrides for render, or why it cannot be
  * taken: whole totem scripts for this canvas, one per totem, keeping all
- * that the canvas held. */
-export function checkArrangement(scripts, canvas, before) {
-  if (!scripts.length) return { reason: 'the answer held no ```xml block with a <Canvas> script.' };
+ * that the canvas held - but for what deletes names, when the user's
+ * message asked for deleting (askedToDelete). */
+export function checkArrangement(scripts, canvas, before, deletes = [], askedToDelete = false) {
+  if (!scripts.length && !deletes.length) return { reason: 'the answer held no ```xml block with a <Canvas> script.' };
+  if (deletes.length && !askedToDelete) return { reason: 'it deletes things, but the user did not ask for anything to be deleted - keep everything, and delete only when the user asks.' };
+  const goneTotems = deletes.filter((d) => d.kind === 'totem').map((d) => d.value);
+  for (const t of goneTotems) if (!before.some((s) => norm(s.name) === norm(t))) return { reason: `<Delete totem="${t}"> names no totem on the canvas - the totems are ${before.map((s) => `"${s.name}"`).join(', ') || 'none'}.` };
   const overrides = [];
   for (const script of scripts) {
     let parsed;
@@ -101,22 +155,44 @@ export function checkArrangement(scripts, canvas, before) {
     if (norm(parsed.canvas) !== norm(canvas)) return { reason: `a script is for the canvas "${parsed.canvas}", but this is "${canvas}".` };
     const name = parsed.totem.attrs.name;
     if (overrides.some((o) => norm(o.name) === norm(name))) return { reason: `the totem "${name}" came twice - send each totem once.` };
+    if (goneTotems.some((t) => norm(t) === norm(name))) return { reason: `the totem "${name}" is both deleted and sent - send it, or delete it, not both.` };
     overrides.push({ name, script, parsed });
   }
   const had = [], has = [];
+  const gone = []; // what the deleted totems held: all of it goes
   for (const s of before) {
     let parsed = null;
     try { parsed = parseScript(s.script); } catch (_) { /* a broken script holds nothing to keep */ }
     if (!parsed) continue;
-    had.push(...heldItems(parsed));
-    if (!overrides.some((o) => norm(o.name) === norm(s.name))) has.push(...heldItems(parsed));
+    const items = heldDetails(parsed);
+    if (goneTotems.some((t) => norm(t) === norm(s.name))) { gone.push(...items); continue; }
+    had.push(...items);
+    if (!overrides.some((o) => norm(o.name) === norm(s.name))) has.push(...items.map((d) => d.key));
   }
   for (const o of overrides) has.push(...heldItems(o.parsed));
+  // Each item lost, once for every copy of it that went; each must be one a <Delete> names.
   const now = counts(has);
+  const left = new Map();
   const lost = [];
-  for (const [k, n] of counts(had)) if ((now.get(k) || 0) < n) lost.push(k);
-  if (lost.length) return { reason: `it lost ${lost.slice(0, 5).join('; ')}${lost.length > 5 ? `, and ${lost.length - 5} more` : ''}. Arranging may move, regroup and rename boxes, but everything the canvas holds must stay on it, word for word.` };
-  return { overrides: overrides.map(({ name, script }) => ({ name, script, owner: OWNER })) };
+  for (const d of had) {
+    const n = (left.has(d.key) ? left.get(d.key) : now.get(d.key) || 0);
+    if (n > 0) { left.set(d.key, n - 1); continue; }
+    left.set(d.key, 0);
+    lost.push(d);
+  }
+  const itemDeletes = deletes.filter((d) => d.kind !== 'totem');
+  const unnamed = lost.filter((d) => !itemDeletes.some((del) => namedBy(del, d)));
+  if (unnamed.length) {
+    const keys = unnamed.map((d) => d.key);
+    return { reason: `it lost ${keys.slice(0, 5).join('; ')}${keys.length > 5 ? `, and ${keys.length - 5} more` : ''}. Arranging may move, regroup and rename boxes, but everything the canvas holds must stay on it, word for word - unless the user asked for it to be deleted, and then name each in a <Delete> tag.` };
+  }
+  const deleted = [...gone, ...lost];
+  return {
+    overrides: overrides.map(({ name, script }) => ({ name, script, owner: OWNER })),
+    removeTotems: before.filter((s) => goneTotems.some((t) => norm(t) === norm(s.name))).map((s) => s.name),
+    deleted: deleted.map((d) => d.key),
+    deletedDrops: [...new Set(deleted.filter((d) => d.drop).map((d) => d.drop))],
+  };
 }
 
 /* drops: what each drop="..." on the canvas is, since the scripts name
@@ -147,7 +223,8 @@ export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops =
       : 'Answer the user in a few plain sentences. If the message only asks about the canvas, answer and add no script.',
     'If it asks for the canvas to change, also add one whole <Canvas name="' + canvas + '"><Totem name="...">...</Totem></Canvas> script, in its own ```xml block, for each totem you change or start. A totem you leave out stays as it is.',
     '- Keep everything the canvas holds - every note\'s words, every text, every file and every drop="..." - somewhere on the canvas, word for word. You may move it between boxes and totems, and make, rename, regroup or remove boxes.',
-    '- Keep the names of the totems that are there: a totem cannot be deleted or renamed. To empty one, move what it holds into others and send it with what is left.',
+    '- Delete only what the user\'s message asks you to delete. Then send the totem\'s script without it, and name each thing deleted in one more ```xml block of its own, <Canvas name="' + canvas + '"><Delete note="the note\'s name"/><Delete text="the text\'s first words"/><Delete drop="d-..."/><Delete image="the image\'s name"/><Delete file="the file\'s name"/></Canvas>. To delete a whole totem with everything in it, put <Delete totem="its name"/> there and send no script for it. Anything left out but not named is refused.',
+    '- Keep the names of the totems that are there: a totem cannot be renamed. To empty one, move what it holds into others and send it with what is left.',
     '- Keep each drop="d-..." on the same kind of tag it is on now.',
     '- When the user asks for a picture - a diagram, a chart, a sketch - draw it as an <Image name="..."> holding one SVG in <![CDATA[ ... ]]>, and copy any <Image> already there exactly.',
     '- If the request asks for something you cannot do this way, do what you can and keep the rest as it is.',
@@ -249,16 +326,18 @@ export class Arranger {
       }
       const scripts = extractScripts(answer.text);
       reply = replyOf(answer.text);
+      const del = extractDeletes(answer.text, job.canvas);
+      if (del.reason) { reason = del.reason; continue; }
       // Words only: a question about the canvas, answered (t-e49cda284a) - unless files came with it.
-      if (!scripts.length && !job.drops.length) return this.finish(job, 'answered', null, [], reply || '(no answer)');
+      if (!scripts.length && !del.deletes.length && !job.drops.length) return this.finish(job, 'answered', null, [], reply || '(no answer)');
       const unplaced = job.drops.filter((id) => !scripts.some((s) => s.includes(`drop="${id}"`)));
       if (unplaced.length) { reason = `the scripts do not place ${unplaced.join(', ')}, which the user attached - put each on the canvas with drop="d-...".`; continue; }
-      const checked = checkArrangement(scripts, job.canvas, before);
+      const checked = checkArrangement(scripts, job.canvas, before, del.deletes, asksToDelete(job.ask));
       if (checked.reason) { reason = checked.reason; continue; }
       try {
         const drawn = await this.writer.serial(() => {
           for (let i = 0; i < RENDER_TRIES; i++) {
-            const r = this.writer.agent.render(job.canvas, { overrides: checked.overrides });
+            const r = this.writer.agent.render(job.canvas, { overrides: checked.overrides, remove: checked.removeTotems });
             if (r !== null) return r;
           }
           throw new Refusal(`${job.canvas} kept changing while NoteX drew it.`);
@@ -269,8 +348,13 @@ export class Arranger {
         reason = e.message;
         continue;
       }
-      const names = checked.overrides.map((o) => o.name);
-      this.log(`Arranged ${job.canvas} as asked: ${names.join(', ')}.`);
+      // A deleted drop goes back to the Inbox, never erased (t-dbfe16a2b9).
+      for (const id of checked.deletedDrops) {
+        try { this.writer.agent.bronze.mark(id, 'waiting', `Deleted from ${job.canvas} by the agent, as you asked. Pick a canvas to place it again, or forget it.`); } catch (e) { if (!(e instanceof BronzeError)) throw e; }
+      }
+      if (checked.deleted.length || checked.removeTotems.length) this.writer.agent.note(job.canvas, 'deleted', { totems: checked.removeTotems, items: checked.deleted.slice(0, 50) });
+      const names = [...checked.overrides.map((o) => o.name), ...checked.removeTotems.map((t) => `${t} (deleted)`)];
+      this.log(`Arranged ${job.canvas} as asked: ${names.join(', ')}${checked.deleted.length ? `; deleted ${checked.deleted.length} item${checked.deleted.length === 1 ? '' : 's'}` : ''}.`);
       return this.finish(job, 'done', null, names, reply);
     }
     this.log(`Could not arrange ${job.canvas}: ${reason}`);

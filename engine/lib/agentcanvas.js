@@ -300,10 +300,14 @@ export class AgentCanvases {
    * hands over; overrides are new scripts for totems, tried as sent - one
    * from notex_write or the placer, or all of an ask's at once
    * (t-b5d4a34951). */
-  build(canvas, fabricDir, state, overrides = []) {
+  build(canvas, fabricDir, state, overrides = [], remove = []) {
     const old = CONTENT.flatMap((k) => (state[k] || []).map((x) => x.id));
     for (const k of CONTENT) state[k] = [];
-    const entries = this.layout(canvas).totems.map((t) => ({ ...t }));
+    // A totem the agent deleted, as the user asked (t-44045fd69e), is not drawn again.
+    const gone = new Set(remove.map(norm));
+    const all = this.layout(canvas).totems.map((t) => ({ ...t }));
+    const entries = all.filter((t) => !gone.has(norm(t.name)));
+    const deleted = all.filter((t) => gone.has(norm(t.name)));
     const fresh = new Map(overrides.map((o) => [norm(o.name), o]));
     for (const o of overrides) if (!entries.some((e) => norm(e.name) === norm(o.name))) entries.push({ name: o.name, file: scriptFile(o.name), owner: o.owner, at: null });
     const out = { written: [], touched: new Set(), removed: old, boxes: [], texts: [], copies: [], wires: [], totemId: null, check: null };
@@ -344,7 +348,7 @@ export class AgentCanvases {
       totems.push({ totem: e.name, drawn: done.which, errors });
     }
     const spaced = [...new Set([...pushed, ...this.spaceOut(entries, state)])];
-    return { out, entries, totems, placed, spaced };
+    return { out, entries, totems, placed, spaced, deleted };
   }
 
   /* The drawn canvas grouped the way CanvasX groups it (magneticTotems): a
@@ -377,15 +381,15 @@ export class AgentCanvases {
    * (backup, temp file, read-back); with override (one totem) or overrides
    * (several), new scripts kept only if the whole canvas draws with all of
    * them. null when the canvas changed under the write - try again. */
-  render(canvas, { override = null, overrides = null } = {}) {
+  render(canvas, { override = null, overrides = null, remove = [] } = {}) {
     const fabricDir = this.writer.canvasDir(canvas);
     if (!isAgentCanvas(fabricDir)) throw new Refusal(`${canvas} is not assigned to the agent - the user assigns it in CanvasX.`);
     const tried = overrides || (override ? [override] : []);
     let built = null;
     const result = this.writer.write(fabricDir, canvas, (state) => {
-      built = this.build(canvas, fabricDir, state, tried);
+      built = this.build(canvas, fabricDir, state, tried, remove);
       return built.out;
-    }, tried.length ? tried[0].owner : null);
+    }, tried.length ? tried[0].owner : (remove.length ? 'NoteX agent' : null));
     if (result === null) return null;
 
     const dir = this.dir(canvas);
@@ -403,6 +407,16 @@ export class AgentCanvases {
         fs.writeFileSync(path.join(dir, e.file), e.text);
       }
       if (e.drawnFrom === 'new' || e.drawnFrom === 'current') fs.writeFileSync(path.join(dir, 'good', e.file), e.text);
+    }
+    // A deleted totem's script is kept among its versions, then goes (t-dbfe16a2b9).
+    for (const e of built.deleted) {
+      const was = this.read(canvas, e.file) ?? this.read(canvas, e.file, 'good');
+      if (was != null) {
+        const vdir = path.join(dir, 'versions', e.file.replace(/\.totem$/, ''));
+        fs.mkdirSync(vdir, { recursive: true });
+        fs.writeFileSync(path.join(vdir, `${stamp}-deleted.totem`), was);
+      }
+      for (const f of [path.join(dir, e.file), path.join(dir, 'good', e.file)]) fs.rmSync(f, { force: true });
     }
     // A totem left out holds none of its drops on the canvas now.
     const layout = { totems: built.entries.map(({ name, file, owner, at, drops }) => ({ name, file, owner: owner || null, at: at || null, drops: drops || [] })) };
