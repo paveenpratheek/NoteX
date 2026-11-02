@@ -510,13 +510,21 @@ async function loadInbox() {
 
 /* The agent places queued drops with Claude, one at a time (t-c24e0494a2);
  * the switch stops it, and the line says what it is doing or why it waits. */
-/* Sonnet, Opus or Haiku, for placing and for asks (t-fe1817678b). */
-const MODEL_LABEL = { sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku' };
+/* Sonnet, Opus or Haiku, for placing and for asks (t-fe1817678b), and Gemini
+ * through Antigravity, apart (t-bdcb28547b). */
+const MODEL_LABEL = {
+  sonnet: 'Sonnet', opus: 'Opus', haiku: 'Haiku',
+  'gemini-3.8-flash-high': 'Gemini 3.8 Flash (High)', 'gemini-3.8-flash-medium': 'Gemini 3.8 Flash (Medium)', 'gemini-3.8-flash-low': 'Gemini 3.8 Flash (Low)',
+};
 function modelSelect(sel, models, current) {
   const keep = sel.value;
   // An engine older than this page sends no models: no empty picker then.
   sel.hidden = !(models && models.length);
-  sel.replaceChildren(...(models || []).map((m) => new Option(MODEL_LABEL[m] || m, m)));
+  const opt = (m) => new Option(MODEL_LABEL[m] || m, m);
+  const group = (label, list) => { const g = document.createElement('optgroup'); g.label = label; g.append(...list.map(opt)); return g; };
+  const gemini = (models || []).filter((m) => m.startsWith('gemini-'));
+  const claude = (models || []).filter((m) => !m.startsWith('gemini-'));
+  sel.replaceChildren(...(gemini.length ? [group('Claude', claude), group('Gemini · Antigravity', gemini)] : claude.map(opt)));
   sel.value = current || keep;
 }
 

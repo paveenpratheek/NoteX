@@ -27,14 +27,15 @@
  */
 import { parseScript, ScriptError } from './script.js';
 import { isAgentCanvas } from './agentcanvas.js';
-import { runClaude, ClaudeError } from './claude.js';
+import { ClaudeError } from './claude.js';
+import { MODELS, runAgent, canvasModel } from './models.js';
 import { FORMAT } from './format.js';
 import { Refusal } from './layout.js';
 import { dropImages, describeDrop } from './placer.js';
 import { BronzeError } from './bronze.js';
 
 export const OWNER = 'NoteX agent';
-export const MODELS = ['sonnet', 'opus', 'haiku'];
+export { MODELS }; // Claude's and Gemini's (t-bdcb28547b)
 export const ASK_MAX = 4_000;
 const ATTEMPTS = 2;
 const RENDER_TRIES = 3;
@@ -158,7 +159,7 @@ export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops =
 }
 
 export class Arranger {
-  constructor({ config, dataDir, writer, run = runClaude, log = () => {}, now = Date.now }) {
+  constructor({ config, dataDir, writer, run = runAgent, log = () => {}, now = Date.now }) {
     Object.assign(this, { config, dataDir, writer, run, log, now });
     this.jobs = new Map(); // canvas -> its latest ask
     this.running = null;
@@ -167,6 +168,11 @@ export class Arranger {
   model() {
     const m = this.config.arranger && this.config.arranger.model;
     return MODELS.includes(m) ? m : 'sonnet';
+  }
+
+  /* The canvas's model: that of its last message, else NoteX's (t-bdcb28547b). */
+  modelFor(canvas) {
+    return canvasModel(this.writer.agent, canvas) || this.model();
   }
 
   report(canvas) {
@@ -189,7 +195,7 @@ export class Arranger {
     if (this.running) throw new Refusal(`The agent is still working on ${this.running.canvas} - ask again once it is done.`);
     const bronze = this.writer.agent.bronze;
     const attachments = drops.map((id) => { const d = bronze.get(id); return { id, name: d.name || 'typed text', kind: d.kind }; });
-    const job = { canvas, ask, model: model || this.model(), source, drops: [...drops], status: 'working', detail: null, reply: null, totems: [], askedAt: this.at(), doneAt: null };
+    const job = { canvas, ask, model: model || this.modelFor(canvas), source, drops: [...drops], status: 'working', detail: null, reply: null, totems: [], askedAt: this.at(), doneAt: null };
     job.history = this.writer.agent.chat(canvas, HISTORY);
     this.jobs.set(canvas, job);
     this.writer.agent.say(canvas, { who: 'user', text: ask, model: job.model, source, ...(attachments.length ? { attachments } : {}) });

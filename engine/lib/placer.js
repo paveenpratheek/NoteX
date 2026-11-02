@@ -25,7 +25,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseScript } from './script.js';
 import { isAgentCanvas } from './agentcanvas.js';
-import { runClaude, ClaudeError } from './claude.js';
+import { ClaudeError } from './claude.js';
+import { runAgent, canvasModel } from './models.js';
 import { FORMAT } from './format.js';
 import { Readings } from './images.js';
 import { BronzeError } from './bronze.js';
@@ -187,7 +188,7 @@ export function buildPrompt({ drop, drops, file, files, canvas, scripts = [], ca
 }
 
 export class Placer {
-  constructor({ config, dataDir, bronze, writer, run = runClaude, log = () => {}, pollMs = POLL_MS, now = Date.now }) {
+  constructor({ config, dataDir, bronze, writer, run = runAgent, log = () => {}, pollMs = POLL_MS, now = Date.now }) {
     Object.assign(this, { config, dataDir, bronze, writer, run, log, pollMs, now });
     this.running = null;
     this.current = null;
@@ -263,7 +264,8 @@ export class Placer {
     const label = drops.length === 1 ? (lead.name || lead.id) : `${drops.length} drops`;
     this.current = lead.id;
     for (const d of drops) this.bronze.mark(d.id, 'placing');
-    const model = (this.config.placer && this.config.placer.model) || 'sonnet';
+    // A drop for a canvas goes with that canvas's model, Gemini's if its chat picked Gemini (t-bdcb28547b).
+    const model = (!byMessage && canvasModel(this.writer.agent, lead.canvas)) || (this.config.placer && this.config.placer.model) || 'sonnet';
     let reason = null;
     let target = lead.canvas;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {

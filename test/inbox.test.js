@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startServer } from '../engine/lib/server.js';
+import { MODELS } from '../engine/lib/models.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'notex-inbox-'));
 const workspace = path.join(tmp, 'workspace');
@@ -215,9 +216,9 @@ test('the placer\'s model is switched from the page, and an ask is refused befor
   const r = await call('PUT', '/api/placer', { body: { model: 'opus' } });
   assert.equal(r.body.placer.model, 'opus');
   assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).placer.model, 'opus');
-  assert.deepEqual((await call('GET', '/api/inbox')).body.models, ['sonnet', 'opus', 'haiku']);
+  assert.deepEqual((await call('GET', '/api/inbox')).body.models, MODELS);
   const one = (await call('GET', '/api/agent-canvases/Harness')).body;
-  assert.deepEqual([one.ask, one.model, one.models], [null, 'sonnet', ['sonnet', 'opus', 'haiku']]);
+  assert.deepEqual([one.ask, one.model, one.models], [null, 'sonnet', MODELS]);
   // Every one of these is refused before any model is asked.
   assert.equal((await call('POST', '/api/agent-canvases/Harness/ask', { body: { ask: 'tidy', model: 'gpt' } })).body.error.code, 'bad-model');
   assert.equal((await call('POST', '/api/agent-canvases/Harness/ask', { body: {} })).status, 400);
@@ -239,7 +240,7 @@ test('CanvasX\'s link: written into the workspace, opening only an agent canvas\
   assert.equal(chat.status, 200);
   assert.equal(chat.headers.get('access-control-allow-origin'), 'http://localhost:9075');
   const body = await chat.json();
-  assert.deepEqual([body.name, Array.isArray(body.chat), body.models], ['Harness', true, ['sonnet', 'opus', 'haiku']]);
+  assert.deepEqual([body.name, Array.isArray(body.chat), body.models], ['Harness', true, MODELS]);
   // The link token opens nothing else, and CanvasX's page reaches nothing else.
   assert.equal((await viaLink('GET', '/api/state')).status, 401);
   assert.equal((await fetch(s.url + '/api/state', { headers: { 'x-notex-token': s.token, origin: 'http://localhost:9075' } })).status, 403);

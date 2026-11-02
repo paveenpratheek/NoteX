@@ -215,7 +215,7 @@ export async function startServer({
       return arranger.askAndWait(canvas, text, MODELS.includes(model) ? model : null, { source: 'canvasxp', drops });
     },
     // What CanvasXP shows in an agent canvas's chat: the conversation NoteX keeps.
-    chat: (name) => ({ name, chat: agent.chat(name, 100), model: arranger.model(), models: MODELS }),
+    chat: (name) => ({ name, chat: agent.chat(name, 100), model: arranger.modelFor(name), models: MODELS }),
   });
 
   /* The canvases assigned to the agent: those whose folder holds the
@@ -308,7 +308,7 @@ export async function startServer({
      * the queue - and with which Claude model (t-fe1817678b). */
     if (m('PUT', /^\/api\/placer$/)) {
       const { on, model } = await readJson(req);
-      if (on === undefined && model === undefined) throw new HttpError(400, 'bad-body', 'Send {"on": true|false} and/or {"model": "sonnet"|"opus"|"haiku"}.');
+      if (on === undefined && model === undefined) throw new HttpError(400, 'bad-body', 'Send {"on": true|false} and/or {"model": "sonnet"|"opus"|"haiku"|"gemini-3.8-flash-high"|...}.');
       if (on !== undefined && typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
       if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
       if (on !== undefined) config.placing = on;
@@ -452,7 +452,7 @@ export async function startServer({
       const fdir = fabricDir(needWorkspace(), name);
       if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
       const mine = isAgentCanvas(fdir);
-      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name), ask: arranger.report(name), chat: agent.chat(name, 100), model: arranger.model(), models: MODELS });
+      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name), ask: arranger.report(name), chat: agent.chat(name, 100), model: arranger.modelFor(name), models: MODELS });
     }
     /* Ask the agent to arrange one of its canvases, in the user's words
      * (t-a9198c414f); the answer comes in the canvas's ask and activity. */
@@ -461,7 +461,7 @@ export async function startServer({
       const fdir = fabricDir(needWorkspace(), name);
       if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
       const { ask, model } = await readJson(req);
-      if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"}.');
+      if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"|"gemini-3.8-flash-high"|...}.');
       if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
       const job = arranger.ask(name, ask, model);
       if (model !== undefined) { config.arranger = { ...(config.arranger || {}), model }; saveConfig(); }
@@ -568,7 +568,7 @@ export async function startServer({
     const fdir = fabricDir(needWorkspace(), name);
     if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
     if (!isAgentCanvas(fdir)) throw new HttpError(409, 'not-agent', `${name} is not assigned to the agent.`);
-    if (req.method === 'GET' && !r[2]) return json(200, { name, chat: agent.chat(name, 100), ask: arranger.report(name), model: arranger.model(), models: MODELS });
+    if (req.method === 'GET' && !r[2]) return json(200, { name, chat: agent.chat(name, 100), ask: arranger.report(name), model: arranger.modelFor(name), models: MODELS });
     /* Files and images attached in the chat: drops of this canvas, landed as
      * placing so the placer leaves them to the chat agent, which places them
      * as the message says (t-79ac13d22a, t-291d7e41be, t-9bc7df3233). */
@@ -587,7 +587,7 @@ export async function startServer({
     }
     if (req.method === 'POST' && r[2] === '/ask') {
       const { ask, model } = await readJson(req);
-      if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"}.');
+      if (typeof ask !== 'string') throw new HttpError(400, 'bad-body', 'Send {"ask": "...", "model": "sonnet"|"opus"|"haiku"|"gemini-3.8-flash-high"|...}.');
       if (model !== undefined && !MODELS.includes(model)) throw new HttpError(400, 'bad-model', `Pick a model of ${MODELS.join(', ')}.`);
       const job = arranger.ask(name, ask, model, { source: 'canvasx' });
       if (model !== undefined) { config.arranger = { ...(config.arranger || {}), model }; saveConfig(); }
