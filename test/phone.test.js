@@ -474,3 +474,41 @@ test('a queued message.md is read from its headings, so an edit before the sync 
   assert.equal(parseQueued('# just notes'), null);
   assert.equal(parseQueued('<!-- CanvasXP {broken -->'), null);
 });
+
+test('a canvas made and given to the agent on the phone gets its queued message answered in its first sync (t-c71788f1f1, t-24d421e17d)', async (t) => {
+  const s = setup(t);
+  xpSetup(s.phone);
+  write(s.ws, 'Notes/fabric.json', '{"n":1}');
+  xpManifest(s.phone);
+  const asked = [];
+  // The engine's own check: only a canvas the PC holds as the agent's is asked.
+  const ask = async (m) => {
+    if (!fs.existsSync(path.join(s.ws, m.canvas, 'agent.json'))) throw new Error(`${m.canvas} is not on the PC yet.`);
+    asked.push(m);
+    write(s.ws, `${m.canvas}/fabric.json`, '{"drawn":true}');
+    return { status: 'done' };
+  };
+  const sync = new PhoneSync({ config: s.config, saveConfig: () => {}, dataDir: s.data, transport: s.transport, keep: () => {}, hostname: 'DESK', ask, chat: (name) => ({ name, chat: [], model: 'sonnet', models: ['sonnet'] }), heartbeatMs: 15 });
+  await sync.setup(DEVICE, ROOT);
+  let r = await sync.sync();
+  assert.equal(r.ok, true, r.error);
+  xpApply(s.phone);
+
+  // Away from the PC: a new canvas, assigned to the agent, and a message for it.
+  write(s.phone, 'Brainstorming/fabric.json', '{}');
+  write(s.phone, 'Brainstorming/agent.json', '{}');
+  xpManifest(s.phone);
+  const dir = xpQueue(s.phone, 'm-7', 'Brainstorming', 'Make 3 totems');
+  r = await sync.sync();
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.unanswered, [], 'nothing refused');
+  assert.deepEqual(r.answered.map((a) => a.canvas), ['Brainstorming']);
+  assert.equal(asked[0].text, 'Make 3 totems');
+  assert.ok(r.pulled.includes('Brainstorming'), 'the canvas came over first');
+  assert.ok(r.pushed.includes('Brainstorming'), 'what the agent drew goes back in the same sync');
+  xpApply(s.phone);
+  assert.ok(!fs.existsSync(path.join(s.phone, QUEUE_DIR, dir)), 'the message is gone from the phone');
+  assert.equal(read(s.phone, 'Brainstorming/fabric.json'), '{"drawn":true}');
+  r = await sync.sync();
+  assert.deepEqual([r.pulled, r.pushed, r.answered], [[], [], []], 'a second sync finds nothing to do');
+});

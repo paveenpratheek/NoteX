@@ -203,7 +203,9 @@ export async function startServer({
      * CanvasX's chat would be (t-e4196083e7). Everything that can refuse it
      * is checked before its files land, so a refused one leaves nothing. */
     ask: async ({ canvas, text, model, files }) => {
-      if (!isAgentCanvas(fabricDir(needWorkspace(), canvas))) throw new Refusal(`${canvas} is not assigned to the agent on the PC any more.`);
+      const fdir = fabricDir(needWorkspace(), canvas);
+      // A canvas the PC does not have is not one taken back (t-05d12c927e).
+      if (!isAgentCanvas(fdir)) throw new Refusal(fs.existsSync(fdir) ? `${canvas} is not assigned to the agent on the PC any more.` : `${canvas} is not on the PC yet.`);
       if (text.length > ASK_MAX) throw new Refusal(`A message to the agent can be at most ${ASK_MAX} characters.`);
       if (!text.trim() && !files.length) throw new Refusal('The message is empty.');
       for (const f of files) {

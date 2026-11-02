@@ -355,6 +355,22 @@ export class PhoneSync {
 
     // Messages queued in CanvasXP's chat go to the agent first, so what it changes goes back in this batch.
     const queue = await this.readQueue(device, root);
+    // An agent canvas made on the phone comes over before its messages are
+    // answered: the PC does not have it yet, so they would be refused
+    // (t-c71788f1f1, t-24d421e17d). The comparison below then sees it as
+    // agreed, and sends back what the agent drew.
+    for (const name of new Set(queue.map((m) => m.canvas))) {
+      const Fc = F[name];
+      if (!Fc || !('agent.json' in Fc) || this.data.base[name] || fs.existsSync(path.join(ws, name))) continue;
+      this.progress = `Copying ${name} from the phone`;
+      try { await this.pull(device, root, ws, name, name, Fc, {}, stamp); } catch (e) {
+        if (e instanceof PhoneError && e.code === 'stale') { result.stale.push(name); continue; }
+        throw e;
+      }
+      this.data.base[name] = { ...Fc };
+      result.pulled.push(name);
+      this.keepIt(name, null);
+    }
     await this.answer(device, root, queue, result, ops);
 
     this.progress = 'Reading the workspace';
