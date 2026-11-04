@@ -29,7 +29,7 @@ const defaultOwner = () => `${client.name} in ${path.basename(process.cwd())}`;
 const INSTRUCTIONS = [
   "NoteX connects File Fabric - the user's spatial canvas of totems, areas, notes, text and files - to agents.",
   'Use notex_read to see a canvas as a totem script: every place with its address, every item with its id, every totem with its owner.',
-  'Use notex_write only when the user asks you to put something on a canvas. Write one totem per script; a later script can <Add> to it, <Edit> what you wrote or <Remove> it. Connect boxes with <Link>; <Line> only draws a line.',
+  'Use notex_write only when the user asks you to put something on a canvas. Write one totem per script; a later script can <Add> to it, <Edit> what you wrote or <Remove> it. Connect boxes with <Link>; <Line> only draws a line. <ProgressBarLink>note name</ProgressBarLink> inside a box puts a progress bar there showing how much of the checklist in that note is done, and links the box to the note itself.',
   'You may change only your own totem. The user\'s totems, anything the user added to yours, and anything the user edited are refused - they are the user\'s.',
   "Never write on the rules canvas: it holds only the user's own words, and NoteX refuses scripts for it.",
   'When File Fabric has the canvas open, a script waits and NoteX writes it once File Fabric lets go; notex_canvases shows what is waiting and what happened.',

@@ -24,6 +24,8 @@ import { polygonsOf, bboxDistance, distToBBox, itemBBox } from './geometry.js';
 import { CHAIN, FIELD } from './rules.js';
 import { M, measureText, measureNote, fileSize, imageSize, imageShown, isImageName, isPdfName, visualBox, textOf, svgSize } from './measure.js';
 import { checkCanvas, overlapsOf } from './check.js';
+import { reachedNotes } from './wires.js';
+import { unlabel } from './script.js';
 
 // A new totem stands beyond the rest's reach (t-4d3c522806).
 export const FREE = FIELD + CHAIN;
@@ -294,6 +296,7 @@ function measure(node, ctx) {
   switch (node.tag) {
     case 'Text': node.size = measureText(node.text, { size: node.attrs.size || M.FONT, maxWidth: ctx.textMax }); break;
     case 'Note': node.size = measureNote(node.text); break;
+    case 'ProgressBarLink': node.size = { w: M.BAR_W, h: M.BAR_LABEL + M.BAR_H }; break;
     case 'File': case 'Image': {
       node.file = node.tag === 'Image' ? resolveImage(node, ctx.opts) : resolveFile(node, ctx.opts);
       const f = node.file;
@@ -428,6 +431,19 @@ function emit(node, ctx, out) {
       out.written.push(id);
       return;
     }
+    case 'ProgressBarLink': {
+      // File Fabric finds a bar's notes from the area under its corner; a totem or a page has none (t-276c70f71d).
+      if (!ctx.areaId || ctx.pageId) throw new Refusal(`a <ProgressBarLink> goes inside an <Area>${ctx.pageId ? ', not on a scroll-box page' : ''} - File Fabric finds a bar's notes from the box it sits in.`, node);
+      const id = opts.newId();
+      state.drawings.push({
+        id, type: 'progress_bar', x, y: y + M.BAR_LABEL, width: M.BAR_W, height: M.BAR_H, progress: 0.5, color: state.areaColor || '#4f46e5',
+        targetNoteId: null, areaId: ctx.areaId, linkedTotemId: ctx.totemId, ...base,
+      });
+      node.id = id;
+      node.area = { id: ctx.areaId, chain: ctx.chain, name: ctx.labels.join(' > ') };
+      out.written.push(id);
+      return;
+    }
     case 'SubTotem': {
       // A totem of its own on the canvas, named to its totem by parentTotemId (t-64e1acbf09).
       const id = opts.newId();
@@ -500,30 +516,76 @@ function emitWires(root, ctx, out) {
   const visit = (node) => {
     for (const c of node.children || []) {
       if (c.tag !== 'Line' && c.tag !== 'Link') { visit(c); continue; }
-      const from = wireEnd(c, 'from', ctx), to = wireEnd(c, 'to', ctx);
-      if (from.chain.includes(to.id) || to.chain.includes(from.id)) throw new Refusal(`<${c.tag}> joins "${from.name}" to a box inside it - a wire joins boxes side by side.`, c);
-      let common = 0;
-      while (common < from.chain.length - 1 && common < to.chain.length - 1 && from.chain[common] === to.chain[common]) common++;
-      const holderKey = from.chain[common - 1];
-      const pageOf = (ch) => ch.find((k) => k.startsWith('page:'));
-      const pf = pageOf(from.chain.slice(common)), pt = pageOf(to.chain.slice(common));
-      if (pf || pt) throw new Refusal(`<${c.tag}> joins a box on a scroll-box page to one outside that page.`, c);
-      const fe = ctx.scene.byId.get(from.id), te = ctx.scene.byId.get(to.id);
-      const fb = ctx.scene.box(fe), tb = ctx.scene.box(te);
-      const l = lineBetween(fb, tb);
-      if (!l) throw new Refusal(`<${c.tag}> joins "${from.name}" and "${to.name}", which overlap.`, c);
-      const id = ctx.opts.newId();
-      if (c.tag === 'Line') {
-        let areaId = null, pageId = null;
-        if (holderKey && holderKey.startsWith('page:')) [, areaId, pageId] = holderKey.split(':');
-        else if (holderKey && !holderKey.startsWith('totem:')) areaId = holderKey;
-        ctx.state.drawings.push({ id, type: 'line', color: ctx.state.areaColor || '#4f46e5', start: l.start, end: l.end, areaId, scrollBoxPageId: pageId, linkedTotemId: ctx.totemId, joins: [from.id, to.id], writtenBy: 'agent' });
-      } else {
-        const [fc, tc] = CORNERS[l.dir];
-        ctx.state.links.push({ id, fromAreaId: from.id, fromCorner: fc, toAreaId: to.id, toCorner: tc, color: fe.item.color || ctx.state.areaColor || '#4f46e5', writtenBy: 'agent' });
+      joinBoxes(c.tag, wireEnd(c, 'from', ctx), wireEnd(c, 'to', ctx), c, ctx, out);
+    }
+  };
+  visit(root);
+}
+
+/* A Link or a Line between two boxes side by side in one totem; its id.
+ * node is the script tag a refusal names. */
+function joinBoxes(tag, from, to, node, ctx, out) {
+  const say = node.tag === 'ProgressBarLink' ? `the link from the progress bar's box to its note` : `<${tag}>`;
+  if (from.chain.includes(to.id) || to.chain.includes(from.id)) throw new Refusal(`${say} joins "${from.name}" to a box inside it - a wire joins boxes side by side.`, node);
+  let common = 0;
+  while (common < from.chain.length - 1 && common < to.chain.length - 1 && from.chain[common] === to.chain[common]) common++;
+  const holderKey = from.chain[common - 1];
+  const pageOf = (ch) => ch.find((k) => k.startsWith('page:'));
+  const pf = pageOf(from.chain.slice(common)), pt = pageOf(to.chain.slice(common));
+  if (pf || pt) throw new Refusal(`${say} joins a box on a scroll-box page to one outside that page.`, node);
+  const fe = ctx.scene.byId.get(from.id), te = ctx.scene.byId.get(to.id);
+  const fb = ctx.scene.box(fe), tb = ctx.scene.box(te);
+  const l = lineBetween(fb, tb);
+  if (!l) throw new Refusal(`${say} joins "${from.name}" and "${to.name}", which overlap.`, node);
+  const id = ctx.opts.newId();
+  if (tag === 'Line') {
+    let areaId = null, pageId = null;
+    if (holderKey && holderKey.startsWith('page:')) [, areaId, pageId] = holderKey.split(':');
+    else if (holderKey && !holderKey.startsWith('totem:')) areaId = holderKey;
+    ctx.state.drawings.push({ id, type: 'line', color: ctx.state.areaColor || '#4f46e5', start: l.start, end: l.end, areaId, scrollBoxPageId: pageId, linkedTotemId: ctx.totemId, joins: [from.id, to.id], writtenBy: 'agent' });
+  } else {
+    const [fc, tc] = CORNERS[l.dir];
+    ctx.state.links.push({ id, fromAreaId: from.id, fromCorner: fc, toAreaId: to.id, toCorner: tc, color: fe.item.color || ctx.state.areaColor || '#4f46e5', writtenBy: 'agent' });
+  }
+  out.written.push(id);
+  out.wires.push({ id, via: tag === 'Line' ? 'line' : 'link', from: from.id, to: to.id });
+  return id;
+}
+
+/* The note a bar names that the script does not hold: in an <Add>, a note
+ * on the canvas in the same totem, by its address or a path ending in it. */
+function barNoteOnCanvas(c, ctx) {
+  const want = c.text.split('>').map((s) => norm(unlabel(s))).filter(Boolean);
+  const segs = (p) => p.address.split(' > ').map((s) => norm(unlabel(s)));
+  const fits = [...ctx.scene.model.places.values()].filter((p) => {
+    if (p.kind !== 'note') return false;
+    const s = segs(p);
+    return s.length >= want.length && want.every((w, i) => s[s.length - want.length + i] === w);
+  });
+  const mine = fits.filter((p) => ctx.scene.totemOf(ctx.scene.byId.get(p.id))?.id === ctx.totemId);
+  if (!mine.length) {
+    throw new Refusal(fits.length ? `"${c.text}" is in another totem - a progress bar shows a note in its own totem.` : `"${c.text}" names no note in this script or on the canvas - give a note's name, or its address as notex_read shows it.`, c);
+  }
+  if (mine.length > 1) throw new Refusal(`"${c.text}" fits ${mine.length} notes (${mine.map((p) => `"${p.address}"`).join(', ')}) - name it by its address.`, c);
+  const p = mine[0];
+  const chain = [];
+  for (let q = p; q && q.kind !== 'totem' && q.kind !== 'fabric'; q = ctx.scene.model.places.get(q.parent)) chain.unshift(q.id);
+  return { id: p.id, chain: [`totem:${ctx.totemId}`, ...chain], name: p.address };
+}
+
+/* Each bar aimed at its note, and its box linked to that note when File
+ * Fabric's walk from the box does not reach it yet - the step the user
+ * would otherwise do by hand with a line (t-abc2613a64). */
+function emitBars(root, ctx, out) {
+  const visit = (node) => {
+    for (const c of node.children || []) {
+      if (c.tag !== 'ProgressBarLink') { visit(c); continue; }
+      const note = c.note ? { id: c.note.id, chain: c.note.chain, name: c.note.path.join(' > ') } : barNoteOnCanvas(c, ctx);
+      const bar = ctx.state.drawings.find((d) => d.id === c.id);
+      bar.targetNoteId = note.id;
+      if (!reachedNotes(c.area.id, ctx.state).some((n) => n.id === note.id)) {
+        bar.linkId = joinBoxes('Link', c.area, note, c, { ...ctx, scene: new Scene(ctx.state) }, out);
       }
-      out.written.push(id);
-      out.wires.push({ id, via: c.tag === 'Line' ? 'line' : 'link', from: from.id, to: to.id });
     }
   };
   visit(root);
@@ -580,6 +642,7 @@ export function layoutTotem(parsed, state, opts) {
   out.boxes.push({ id: `totem:${totemId}`, address: `${name} (totem)` });
   emit(parsed.totem, { state, opts: ctx.opts, areaId: null, pageId: null, totemId, chain: [`totem:${totemId}`], labels: [`${name} (totem)`] }, out);
   emitWires(parsed.totem, { state, opts: ctx.opts, totemId, scene: new Scene(state) }, out);
+  emitBars(parsed.totem, { state, opts: ctx.opts, totemId, scene: new Scene(state) }, out);
   gate(before, state, out);
   return out;
 }
@@ -664,6 +727,7 @@ export function layoutAdd(parsed, state, opts) {
   } else keepApart(grown, totem.id, new Set(newItems.map((e) => e.item.id)), nopts);
 
   emitWires(parsed.node, { state, opts: nopts, totemId: totem.id, scene: new Scene(state) }, out);
+  emitBars(parsed.node, { state, opts: nopts, totemId: totem.id, scene: new Scene(state) }, out);
   redrawLines(new Scene(state), out);
   gate(before, state, out);
   return out;
@@ -709,6 +773,9 @@ function removeItem(state, node, parsed, opts, out) {
   // The wires joining what goes would be left joining nothing.
   for (const l of state.links) if (going.has(l.fromAreaId) || going.has(l.toAreaId)) going.add(l.id);
   for (const d of state.drawings) if (d.type === 'line' && Array.isArray(d.joins) && d.joins.some((j) => going.has(j))) going.add(d.id);
+  // An agent's bar goes with the note it shows, and the link NoteX made for a bar goes with it (t-276c70f71d).
+  for (const d of state.drawings) if (d.type === 'progress_bar' && d.writtenBy === 'agent' && going.has(d.targetNoteId)) going.add(d.id);
+  for (const d of state.drawings) if (d.type === 'progress_bar' && going.has(d.id) && d.linkId && state.links.some((l) => l.id === d.linkId)) going.add(d.linkId);
   const all = [...state.areas, ...state.drawings, ...state.files, ...state.totems, ...state.links];
   for (const item of all) {
     if (!going.has(item.id)) continue;
@@ -761,7 +828,8 @@ export function layoutEdits(parsed, state, opts) {
         it.textContent = node.text;
         const m = measureNote(node.text, { width: old.maxX - old.minX });
         setRect(it, { ...old, maxY: Math.max(old.maxY, old.minY + m.h) });
-      } else throw new Refusal(`${describe(scene, e)} holds no text of its own - <Add> a <Text> to it instead.`, node);
+      } else if (it.type === 'progress_bar') throw new Refusal('a progress bar shows the note it was made for - <Remove> it and <Add> a new <ProgressBarLink> naming the other note.', node);
+      else throw new Refusal(`${describe(scene, e)} holds no text of its own - <Add> a <Text> to it instead.`, node);
       out.touched.add(it.id);
       settle(scene, e, old, { ...opts, node }, out.touched);
       redrawLines(new Scene(state), out);

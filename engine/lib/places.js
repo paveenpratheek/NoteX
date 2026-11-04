@@ -73,7 +73,7 @@ export function buildPlaces(fabric) {
 
   const places = new Map();
   const add = (p) => {
-    places.set(p.id, { children: [], files: [], texts: [], textByAgent: [], textIds: [], pens: 0, neighbours: [], wires: [], reach: null, ...p });
+    places.set(p.id, { children: [], files: [], texts: [], textByAgent: [], textIds: [], pens: 0, bars: [], neighbours: [], wires: [], reach: null, ...p });
     return places.get(p.id);
   };
   const root = add({ id: 'fabric', kind: 'fabric', name: fabric.name, parent: null });
@@ -169,6 +169,12 @@ export function buildPlaces(fabric) {
   }
   const NEVER_DRAWN = new Set(['path', 'draw', 'select', 'pan', 'delete']);
   for (const d of state.drawings || []) {
+    // A progress bar, by id, in the place it sits: a read-out says which note it shows (t-abc2613a64).
+    if (d.type === 'progress_bar' && typeof d.x === 'number') {
+      const at = placeFor(d, true);
+      if (at) places.get(at).bars.push(d.id);
+      continue;
+    }
     if (!readable(d)) { if (NEVER_DRAWN.has(d.type)) left.unshown++; continue; }
     const at = placeFor(d, true);
     if (!at) continue;

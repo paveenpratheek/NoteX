@@ -20,6 +20,8 @@ export const M = {
   NOTE_W: 250, NOTE_MAX_W: 420, NOTE_MIN_H: 120,
   AREA_MIN_W: 200, AREA_MIN_H: 150, SCROLL_MIN_W: 400, SCROLL_MIN_H: 300,
   IMAGE_MAX_W: 480,
+  // A progress bar: File Fabric's 300 x 20, with its note's name and percent written 8 px above it in 14 px type.
+  BAR_W: 300, BAR_H: 20, BAR_LABEL: 26,
 };
 
 // Inter averages about half an em a character; 0.55 keeps an estimate on the wide side.
@@ -186,6 +188,8 @@ export function visualBox(item, kind) {
   if (kind === 'file') return fileBox(item);
   if (kind === 'totem') return { minX: item.x, minY: item.y, maxX: item.x, maxY: item.y };
   if (item.type === 'text') return textBox(item);
+  // A progress bar with the line File Fabric writes above it (t-abc2613a64).
+  if (item.type === 'progress_bar') return { minX: item.x, minY: item.y - M.BAR_LABEL, maxX: item.x + (item.width || M.BAR_W), maxY: item.y + (item.height || M.BAR_H) };
   if (item.start && item.end) return pointsBox([item.start, item.end]);
   if (Array.isArray(item.points) && item.points.length) return pointsBox(item.points);
   if (item.x !== undefined && item.y !== undefined) return { minX: item.x, minY: item.y, maxX: item.x + 100, maxY: item.y + 50 };

@@ -64,6 +64,7 @@ export function contentKeys(parsed) {
       else if (c.tag === 'File') keys.add(`the file ${what(c.attrs.path)}`);
       else if (c.tag === 'Image') keys.add(`the image "${c.attrs.name}"`);
       else if (c.tag === 'Link' || c.tag === 'Line') keys.add(`the ${c.tag} from ${c.attrs.from} to ${c.attrs.to}`);
+      else if (c.tag === 'ProgressBarLink') keys.add(`the progress bar in ${at.join(' > ')} for ${c.text}`);
       visit(c, ['Area', 'ScrollBox', 'Note'].includes(c.tag) ? here : at);
     }
   };

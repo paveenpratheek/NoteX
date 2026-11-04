@@ -9,6 +9,7 @@
  *         <Area name="Read"><Text>Survey first.</Text></Area>
  *       </Row>
  *       <Line from="Collect" to="Read"/>
+ *       <Area name="Status"><ProgressBarLink>Todo</ProgressBarLink></Area>
  *     </Totem>
  *   </Canvas>
  *
@@ -54,6 +55,8 @@ const TAGS = {
   Image: { attrs: { name: true }, holds: 'text' },
   Line: { attrs: { from: true, to: true }, holds: 'nothing' },
   Link: { attrs: { from: true, to: true }, holds: 'nothing' },
+  // A progress bar in its box, showing the named note's checklist; NoteX links the box to the note (t-abc2613a64).
+  ProgressBarLink: { attrs: {}, holds: 'text' },
   Row: { attrs: {}, holds: 'tags' },
   Column: { attrs: {}, holds: 'tags' },
   ScrollBox: { attrs: { name: true }, holds: 'tags' },
@@ -78,16 +81,18 @@ export function svgProblem(svg) {
   return null;
 }
 const WIRES = ['Line', 'Link'];
+// A bar finds its notes from the box it sits in, so it goes in a box (t-276c70f71d).
+const BAR = 'ProgressBarLink';
 const INSIDE = {
   '': ['Canvas', 'Add'],
   Canvas: ['Totem', 'Edit', 'Remove'],
-  Add: [...CONTENT, ...WIRES],
+  Add: [...CONTENT, ...WIRES, BAR],
   Totem: [...CONTENT, ...WIRES, 'SubTotem'],
   SubTotem: [...CONTENT, ...WIRES],
-  Area: [...CONTENT, ...WIRES],
+  Area: [...CONTENT, ...WIRES, BAR],
   Page: [...CONTENT, ...WIRES],
-  Row: CONTENT,
-  Column: CONTENT,
+  Row: [...CONTENT, BAR],
+  Column: [...CONTENT, BAR],
   ScrollBox: ['Page'],
 };
 // Boxes are what a script names and a Line or Link joins.
@@ -223,6 +228,7 @@ function build(tokens) {
     const allowed = INSIDE[parent.tag] || [];
     if (!allowed.includes(tag)) {
       const where = parent.tag ? `inside <${parent.tag}>` : 'at the top of a script';
+      if (tag === BAR) throw new ScriptError(`<${BAR}> cannot go ${where} - put it inside the <Area> it should show in, e.g. <Area name="Status"><${BAR}>Todo</${BAR}></Area>.`, t.line, t.col);
       const can = allowed.length ? ` Only ${allowed.map((n) => `<${n}>`).join(', ')} can go there.` : '';
       throw new ScriptError(`<${tag}> cannot go ${where}.${can}`, t.line, t.col);
     }
@@ -276,6 +282,11 @@ function finish(node) {
     if (node.tag !== 'Image' && node.text.length > LIMITS.text) throw new ScriptError(`<${node.tag}> holds more than ${LIMITS.text} characters.`, node.line, node.col);
     if (drop !== undefined && node.text.trim()) throw new ScriptError(`<${node.tag} drop> takes its words from the drop - leave it empty, e.g. <${node.tag}${node.tag === 'Note' ? ' name="..."' : ''} drop="${drop}"/>.`, node.line, node.col);
     if (node.tag !== 'Edit' && drop === undefined && !node.text.trim()) throw new ScriptError(`<${node.tag}> is empty.`, node.line, node.col);
+  }
+  if (node.tag === BAR) {
+    // It holds a note's name, or a path to it such as "Plan > Todo".
+    node.text = node.text.replace(/\s+/g, ' ').trim();
+    if (node.text.length > LIMITS.name * 4) throw new ScriptError(`<${BAR}> holds the name of a note, or a path to it - not ${node.text.length} characters.`, node.line, node.col);
   }
   if (node.tag === 'Image') {
     const why = svgProblem(node.text);
@@ -362,6 +373,39 @@ function checkWires(top, boxes, { allowOutside }) {
   visit(top);
 }
 
+/* The note a <ProgressBarLink> names, in the script: its name or a path
+ * ending in it; a read-out's full address works too, its (totem) and (note)
+ * labels ignored. null when no note in the script fits - an <Add> may still
+ * find it on the canvas. */
+export const unlabel = (s) => String(s).replace(/\s*\((?:totem|sub-totem|note|scroll box)\)\s*$/i, '').trim();
+export function findNote(boxes, ref) {
+  const want = ref.split('>').map((s) => unlabel(s).toLowerCase()).filter(Boolean);
+  const fits = (b) => {
+    const p = b.path.map((s) => s.toLowerCase());
+    const n = Math.min(p.length, want.length);
+    return want.slice(want.length - n).every((w, i) => p[p.length - n + i] === w) && (want.length <= p.length || want.length - p.length <= 2);
+  };
+  const notes = boxes.filter((b) => b.tag === 'Note' && fits(b));
+  if (notes.length > 1) return { many: notes };
+  if (notes[0]) return { box: notes[0] };
+  const other = boxes.find((b) => b.tag !== 'Note' && fits(b));
+  return other ? { notNote: other } : null;
+}
+
+function checkBars(top, boxes, { allowOutside }) {
+  const visit = (node) => {
+    for (const c of node.children) {
+      if (c.tag !== BAR) { visit(c); continue; }
+      const f = findNote(boxes, c.text);
+      if (f && f.many) throw new ScriptError(`"${c.text}" fits ${f.many.length} notes (${f.many.map((b) => b.path.join(' > ')).join('; ')}) - name it by its path, e.g. "${f.many[0].path.join(' > ')}".`, c.line, c.col);
+      if (f && f.notNote) throw new ScriptError(`"${c.text}" is ${f.notNote.tag === 'Area' ? 'an <Area>' : `a <${f.notNote.tag}>`}, not a <Note> - a progress bar shows a note's "- [ ]" checklist.`, c.line, c.col);
+      if (!f && !allowOutside) throw new ScriptError(`"${c.text}" names no <Note> in this script - a progress bar shows a note's "- [ ]" checklist.`, c.line, c.col);
+      c.note = f ? f.box : null;
+    }
+  };
+  visit(top);
+}
+
 /* A script as a checked tree, or a ScriptError naming the line. */
 export function parseScript(src) {
   if (typeof src !== 'string' || !src.trim()) throw new ScriptError('The script is empty.');
@@ -382,6 +426,7 @@ export function parseScript(src) {
     if (totems.length) {
       const boxes = collectBoxes(totems[0]);
       checkWires(totems[0], boxes, { allowOutside: false });
+      checkBars(totems[0], boxes, { allowOutside: false });
       return { kind: 'totem', canvas: top.attrs.name, totem: totems[0], boxes };
     }
     const seen = new Map();
@@ -395,6 +440,7 @@ export function parseScript(src) {
   if (!top.children.length) throw new ScriptError('<Add> holds nothing to add.', top.line, top.col);
   const boxes = collectBoxes(top);
   checkWires(top, boxes, { allowOutside: true });
+  checkBars(top, boxes, { allowOutside: true });
   return { kind: 'add', canvas: top.attrs.canvas, at: top.attrs.at, node: top, boxes };
 }
 

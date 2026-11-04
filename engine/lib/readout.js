@@ -10,6 +10,7 @@
  * script that carries them is refused (t-bb0a5fdf1f).
  */
 import { buildPlaces, plainText } from './places.js';
+import { barNotes } from './wires.js';
 import { escapeText, escapeAttr } from './script.js';
 import { visualBox } from './measure.js';
 import { fingerprint } from './writer.js';
@@ -62,6 +63,7 @@ export function readOut(fabric, { at = null, ledger = null } = {}) {
     }
     p.textIds.forEach((id) => { const d = byId.get(id); if (d) out.push({ kind: 'text', item: d, box: visualBox(d, 'drawing') }); });
     for (const f of p.files) { const it = byId.get(f.id); if (it) out.push({ kind: 'file', item: it, f, box: visualBox(it, 'file') }); }
+    for (const id of p.bars) { const it = byId.get(id); if (it) out.push({ kind: 'bar', item: it, box: visualBox(it, 'drawing') }); }
     const rank = (x) => (x.kind === 'place' && x.p.kind === 'canvas' ? 1 : 0);
     return out.sort((a, b) => (a.page - b.page) || (rank(a) - rank(b)) || ((a.box?.minY ?? 0) - (b.box?.minY ?? 0)) || ((a.box?.minX ?? 0) - (b.box?.minX ?? 0)));
   };
@@ -104,6 +106,13 @@ export function readOut(fabric, { at = null, ledger = null } = {}) {
       lines.push(`${pad(d)}<Text id="${escapeAttr(x.item.id)}"${size}${marks(x.item, holder)}>${body(words, d)}</Text>`);
       return;
     }
+    if (x.kind === 'bar') {
+      // The note File Fabric shows on the bar, by address; several when one bar shows its box's whole network.
+      const shown = barNotes(x.item, state).notes.map((n) => P(n.id)?.address).filter(Boolean);
+      const open = `${pad(d)}<ProgressBarLink id="${escapeAttr(x.item.id)}"${shown.length > 1 ? ' shows="all of these"' : ''}${marks(x.item, holder)}`;
+      lines.push(shown.length ? `${open}>${escapeText(shown.join('; '))}</ProgressBarLink>` : `${open}/> <!-- reaches no note, so it shows no progress -->`);
+      return;
+    }
     const kind = x.f.kind === 'file' ? '' : ` kind="${x.f.kind}"`;
     lines.push(`${pad(d)}<File path="${escapeAttr(x.f.name || '')}" id="${escapeAttr(x.item.id)}"${kind}${marks(x.item, holder)}/>`);
   };
@@ -112,6 +121,7 @@ export function readOut(fabric, { at = null, ledger = null } = {}) {
   for (const p of model.places.values()) {
     for (const id of p.textIds) holderOf.set(id, p.id);
     for (const f of p.files) holderOf.set(f.id, p.id);
+    for (const id of p.bars) holderOf.set(id, p.id);
   }
   const placeOf = (x) => holderOf.get(x.item.id);
 

@@ -61,7 +61,7 @@ export function checkCanvas(state, model) {
     const p = model.places.get(a.id);
     if (!p) continue;
     if (!String(a.name || '').trim() && !a.isScrollBox) find('unnamed', [a.id], `a ${kindOf(a)} with no name at ${where(a.id)}`);
-    const nothing = !p.children.length && !p.files.length && !p.texts.length && !p.pens && !(a.isNote && String(a.textContent || '').trim());
+    const nothing = !p.children.length && !p.files.length && !p.texts.length && !p.pens && !p.bars.length && !(a.isNote && String(a.textContent || '').trim());
     if (nothing) find('empty', [a.id], `"${name(a)}" has nothing in it`);
   }
   for (let i = 0; i < areas.length; i++) for (let j = i + 1; j < areas.length; j++) {

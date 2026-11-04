@@ -59,6 +59,8 @@ export function fingerprint(item) {
     start: item.start ? pts([item.start]) : undefined, end: item.end ? pts([item.end]) : undefined,
     imageWidth: r(item.imageWidth), imageHeight: r(item.imageHeight), pages: item.pages ? item.pages.map((p) => p.id) : undefined,
     from: item.fromAreaId, to: item.toAreaId, corners: item.fromCorner ? [item.fromCorner, item.toCorner] : undefined,
+    // A bar the user aimed at another note is the user's from then on.
+    target: item.targetNoteId || undefined,
   };
   return crypto.createHash('sha1').update(JSON.stringify(pick)).digest('hex').slice(0, 16);
 }

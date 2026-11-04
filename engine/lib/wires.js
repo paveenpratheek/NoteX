@@ -63,6 +63,27 @@ export function reachedNotes(startId, state) {
   return notes.sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
+/* The notes a progress bar shows, as File Fabric picks them (script.js
+ * L7931-7997): the walk from the smallest area under the bar's corner; the
+ * note its targetNoteId names when the walk reaches it; else, alone in that
+ * area, every note reached, or among several bars the note at its place
+ * top to bottom. A read-out says which note each bar shows (t-abc2613a64). */
+export function barNotes(bar, state) {
+  const areas = (state.areas || []).filter((a) => a.polygons);
+  const under = (pt) => areas.filter((a) => a.polygons.some((p) => isPointInPolygon(pt, p)));
+  const hits = under({ x: bar.x, y: bar.y }).sort((a, b) => areaSize(a) - areaSize(b));
+  const parent = hits[0];
+  if (!parent) return { area: null, notes: [] };
+  const reached = reachedNotes(parent.id, state);
+  if (!reached.length) return { area: parent, notes: [] };
+  const target = bar.targetNoteId && reached.find((n) => n.id === bar.targetNoteId);
+  if (target) return { area: parent, notes: [target] };
+  const peers = (state.drawings || []).filter((d) => d.type === 'progress_bar' && parent.polygons.some((p) => isPointInPolygon({ x: d.x, y: d.y }, p))).sort((a, b) => a.y - b.y);
+  if (peers.length === 1) return { area: parent, notes: reached };
+  const i = peers.findIndex((d) => d.id === bar.id);
+  return { area: parent, notes: [i < reached.length ? reached[i] : reached[reached.length - 1]] };
+}
+
 /* The wires to write beside a place: every link, and every Line-tool line
  * whose ends sit in two different areas, neither holding the other end -
  * a line drawn inside one area is a drawing, not a wire. An end's area is

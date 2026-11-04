@@ -40,6 +40,9 @@ export const FORMAT = [
   'To connect two boxes, use <Link from to>: File Fabric\'s link between the boxes\' corner dots (such as bottom-left to top-left), which is what a connection is on a canvas.',
   '<Line from to> only draws a line between two boxes with File Fabric\'s Line tool - a drawing, not a connection; use it only when the user asks for a drawn line.',
   'Both name their boxes by name, by a path such as "Collect > Todo" when two share a name, or in an <Add> by a full address.',
+  // The bar and its link in one tag, instead of a box, a bar and a drawn line (t-abc2613a64).
+  'A progress bar showing how much of a note\'s "- [ ]" checklist is done: <ProgressBarLink>Todo</ProgressBarLink> inside the <Area> it should sit in, holding the note\'s name (or a path such as "Collect > Todo").',
+  'NoteX places the bar in that box, aims it at the note and links the box to the note when nothing joins them yet - write no <Link> for it. The note must be in the same totem.',
   'Children stack top to bottom. Give no sizes or positions: NoteX lays everything out, in free space far from the other totems.',
   // Stacked items made the user's totems thin and long; rows of three spread them across (t-657e827477, t-fd28968487).
   'Stacked, a totem grows long: put a box\'s items - images, texts and notes in any mix - side by side in a <Row> of up to three, and a fourth below.',
