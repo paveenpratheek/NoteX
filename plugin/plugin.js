@@ -719,6 +719,7 @@ async function openAgentCanvas(name) {
   assign.setAttribute('aria-checked', String(c.agent));
   assign.title = c.agent ? 'Take it back: it becomes your canvas again, holding what NoteX last drew' : 'Assign it to the agent: NoteX draws it from the agent\'s scripts, and CanvasX shows it view-only';
   $('render-btn').hidden = !c.agent;
+  renderHistory(c);
   $('agent-help').textContent = c.agent
     ? 'NoteX draws this canvas from the scripts below; CanvasX shows it view-only. Drops you send it from the Inbox are placed into these scripts.'
     : `Only an empty canvas can be assigned, and not while CanvasX has it open${c.open ? ' - it is open now' : ''}. Make a new canvas in CanvasX for the agent.`;
@@ -833,6 +834,44 @@ async function toggleAssign() {
   const on = $('assign-btn').getAttribute('aria-checked') !== 'true';
   if (!on && !window.confirm(`Take ${name} back from the agent? It becomes your canvas again, holding what NoteX last drew, and NoteX stops drawing it.`)) return;
   try { await engine.setAgent(name, on); toast(on ? `${name} is the agent's now.` : `${name} is yours again.`); await loadAgents(); } catch (e) { toast(e.message, true); }
+}
+
+/* Keep history: the canvas's scripts kept at every write, so they can be
+ * had as they stood at any time (t-732b681a32). Times show in this
+ * browser's own time zone; the records keep UTC. */
+function renderHistory(c) {
+  const h = c.history;
+  const btn = $('history-btn');
+  // An engine older than this page sends no history.
+  btn.hidden = !h || (!c.agent && !h.kept);
+  $('history-box').hidden = !h || (!h.on && !h.kept);
+  if (!h) return;
+  btn.setAttribute('aria-checked', String(h.on));
+  btn.disabled = !c.agent && !h.on;
+  btn.title = h.on ? 'Stop keeping history: what was kept stays, nothing more is added'
+    : 'Keep history: every write of these scripts is kept, with who wrote it and when, starting with the versions NoteX already has';
+  const local = (iso) => (iso ? new Date(iso).toLocaleString() : '');
+  $('history-line').textContent = h.error ? h.error
+    : h.on ? `Kept since ${local(h.since)}, in NoteX's data folder - never pushed anywhere.`
+      : h.kept ? `Not kept since ${local(h.off)}; what was kept stays.` : '';
+  const ul = $('history-list');
+  ul.replaceChildren();
+  for (const e of h.latest || []) {
+    const what = [e.added.length ? `added ${e.added.join(', ')}` : '', e.changed.length ? `changed ${e.changed.join(', ')}` : '', e.deleted.length ? `deleted ${e.deleted.join(', ')}` : ''].filter(Boolean).join('; ') || 'the totems in a new order';
+    const li = el('li', null);
+    li.append(el('span', 'when', local(e.at)), el('span', null, `${e.who}: ${what}`));
+    ul.append(li);
+  }
+}
+
+async function toggleHistory() {
+  const name = S.agentCanvas;
+  const on = $('history-btn').getAttribute('aria-checked') !== 'true';
+  try {
+    const r = await engine.setHistory(name, on);
+    toast(on ? `${name}'s history is kept${r.history.replayed ? `, starting with ${r.history.replayed} earlier write${r.history.replayed === 1 ? '' : 's'}` : ''}.` : `${name}'s history is no longer kept; what was kept stays.`);
+  } catch (e) { toast(e.message, true); }
+  await openAgentCanvas(name);
 }
 
 async function drawAgain() {
@@ -1042,6 +1081,7 @@ $('phone-use').addEventListener('click', usePhoneFolder);
 $('phone-cancel').addEventListener('click', () => { S.phoneBrowsing = false; loadPhone(); });
 $('agents-reload').addEventListener('click', loadAgents);
 $('assign-btn').addEventListener('click', toggleAssign);
+$('history-btn').addEventListener('click', toggleHistory);
 $('render-btn').addEventListener('click', drawAgain);
 $('drop-files').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; attach(files); });
 $('drop-send').addEventListener('click', sendDrop);

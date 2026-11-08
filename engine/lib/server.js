@@ -20,6 +20,9 @@
  * it arrived until it is placed on an agent canvas (t-1c0fff1756).
  * <data>/phone/ is the phone sync's: what the workspace and CanvasXP's folder
  * on the phone last agreed on, and backups (t-71306596ff).
+ * <data>/history/ keeps, for each agent canvas the user switched Keep
+ * history on for, a git repository of its totem scripts over time
+ * (t-732b681a32); config.json says which, and since when.
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -47,6 +50,7 @@ import { DropSync } from './dropsync.js';
 import { forgetDrop } from './forget.js';
 import { PhoneSync, PhoneError } from './phone.js';
 import { ShellTransport } from './mtp.js';
+import { History, HistoryError } from './history.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
@@ -175,6 +179,16 @@ export async function startServer({
   // Canvases assigned to the agent are drawn from their scripts (t-0b88e8ea91).
   const agent = new AgentCanvases({ dataDir: dir, writer, bronze, log });
   writer.agent = agent;
+  // An agent canvas's scripts over time, where the user keeps them (t-732b681a32).
+  const history = new History({ dataDir: dir, config, saveConfig, log, ...(syncOptions.git ? { git: syncOptions.git } : {}) });
+  agent.history = history;
+  const historyHttp = (fn) => {
+    try { return fn(); } catch (e) {
+      if (!(e instanceof HistoryError)) throw e;
+      const status = { 'bad-time': 400, 'no-history': 404 }[e.code] || (e.code === 'git-failed' ? 500 : 409);
+      throw new HttpError(status, e.code, e.message);
+    }
+  };
   // What is on an agent canvas goes on to RAGX after each render (t-7513cdd783).
   const dropSync = new DropSync({ dataDir: dir, config, agent, bronze, log, ...(syncOptions.runtime ? { runtime: syncOptions.runtime } : {}) });
   agent.onRendered = (canvas) => { dropSync.queue(canvas).catch((e) => log(`Sending ${canvas}'s drops failed: ${e.message}`)); };
@@ -418,6 +432,17 @@ export async function startServer({
       const name = decodeURIComponent(p[0]);
       const fdir = fabricDir(needWorkspace(), name);
       const at = url.searchParams.get('at') || null;
+      /* The scripts as they stood at a time, from the canvas's history -
+       * its own word, so it never mixes with at= (t-732b681a32). */
+      const when = url.searchParams.get('when');
+      if (when) {
+        const then = historyHttp(() => history.at(name, when));
+        const want = at ? at.split('>')[0].replace(/\(totem\)/i, '').trim().toLowerCase() : null;
+        const all = then ? then.totems.filter((s) => s.script && (!want || s.name.toLowerCase() === want)) : [];
+        if (at && then && !all.length) throw new HttpError(404, 'no-place', `No totem on ${name} at ${when} matches "${at}".`);
+        const head = then ? `<!-- ${name} as it stood at ${when}: the scripts written at ${then.at} by ${then.who}. -->` : `<!-- ${name} had no scripts yet at ${when}. -->`;
+        return json(200, { name, at, when, agent: true, script: [head, ...all.map((s) => s.script.trim())].join('\n\n'), commit: then ? then.commit : null, written: then ? then.at : null, by: then ? then.who : null });
+      }
       if (isAgentCanvas(fdir)) {
         // An agent canvas is its scripts: they are what an agent reads and sends back changed (t-c42859ce48).
         const want = at ? at.split('>')[0].replace(/\(totem\)/i, '').trim().toLowerCase() : null;
@@ -454,7 +479,9 @@ export async function startServer({
       const fdir = fabricDir(needWorkspace(), name);
       if (!fs.existsSync(path.join(fdir, 'fabric.json'))) throw new HttpError(404, 'not-found', `No canvas ${name} in the workspace.`);
       const mine = isAgentCanvas(fdir);
-      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), lastRender: agent.lastRender(name), ask: arranger.report(name), chat: agent.chat(name, 100), model: arranger.modelFor(name), models: MODELS });
+      let kept = { ...history.report(name), latest: [] };
+      try { kept.latest = history.log(name, 10); } catch (e) { kept.error = e.message; }
+      return json(200, { name, agent: mine, open: writer.isOpen(fdir), totems: mine ? agent.totems(name) : [], activity: agent.activity(name), history: kept, lastRender: agent.lastRender(name), ask: arranger.report(name), chat: agent.chat(name, 100), model: arranger.modelFor(name), models: MODELS });
     }
     /* Ask the agent to arrange one of its canvases, in the user's words
      * (t-a9198c414f); the answer comes in the canvas's ask and activity. */
@@ -477,6 +504,23 @@ export async function startServer({
       if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
       // Assigned, it is kept in RAGX by itself from the next look (t-65a490ef80).
       return json(200, { name, agent: on, changed: agent.assign(name, on) });
+    }
+    /* Keep history: an agent canvas's scripts committed at every write, and
+     * on switching on, what NoteX already kept (t-732b681a32, t-9dbb490caa).
+     * Off, nothing more is kept and what was kept stays. */
+    if ((p = m('PUT', /^\/api\/fabrics\/([^/]+)\/history$/))) {
+      const name = decodeURIComponent(p[0]);
+      const fdir = fabricDir(needWorkspace(), name);
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'bad-body', 'Send {"on": true} or {"on": false}.');
+      if (on && !isAgentCanvas(fdir)) throw new HttpError(409, 'not-agent', `${name} is not assigned to the agent - history is kept only for agent canvases, whose scripts are the canvas.`);
+      const r = await writer.serial(() => historyHttp(() => history.set(name, on, { replay: () => agent.replay(name), snapshot: () => agent.snapshot(name) })));
+      return json(200, { name, history: r, latest: history.log(name, 10) });
+    }
+    if ((p = m('GET', /^\/api\/fabrics\/([^/]+)\/history$/))) {
+      const name = decodeURIComponent(p[0]);
+      fabricDir(needWorkspace(), name);
+      return json(200, { name, history: history.report(name), commits: historyHttp(() => history.log(name)) });
     }
     /* An agent canvas drawn again from its scripts, e.g. after a script file was mended by hand. */
     if ((p = m('POST', /^\/api\/fabrics\/([^/]+)\/render$/))) {

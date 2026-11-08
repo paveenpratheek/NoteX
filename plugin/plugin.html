@@ -130,6 +130,7 @@
       <div class="title-row"><h1 id="agent-title">Pick a canvas</h1><span class="note" id="agent-sub"></span></div>
       <div class="switches">
         <button id="assign-btn" class="switch" role="switch" aria-checked="false" hidden>Assigned to the agent</button>
+        <button id="history-btn" class="switch" role="switch" aria-checked="false" hidden>Keep history</button>
         <button id="render-btn" title="Draw this canvas again from its totem scripts" hidden>Draw again</button>
       </div>
       <p class="note" id="agent-help"></p>
@@ -147,6 +148,11 @@
         <span class="eyebrow">Totem scripts</span>
         <ul id="totem-list" class="totems"></ul>
         <pre id="totem-script" class="doc card" hidden></pre>
+        <div id="history-box" hidden>
+          <span class="eyebrow">History</span>
+          <p class="note" id="history-line"></p>
+          <ul id="history-list" class="activity"></ul>
+        </div>
         <span class="eyebrow">Activity</span>
         <ul id="activity-list" class="activity"></ul>
       </div>

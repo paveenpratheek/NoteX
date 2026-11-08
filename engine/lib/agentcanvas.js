@@ -30,6 +30,7 @@ import { bboxDistance } from './geometry.js';
 import { magneticTotems, FIELD, CHAIN } from './rules.js';
 import { FabricError } from './fabric.js';
 import { BronzeError } from './bronze.js';
+import { replaySteps } from './history.js';
 
 export const isAgentCanvas = (dir) => fs.existsSync(path.join(dir, 'agent.json'));
 
@@ -95,6 +96,7 @@ export class AgentCanvases {
     Object.assign(this, { writer, bronze, log, now });
     this.root = path.join(dataDir, 'agent-canvases');
     this.onRendered = null; // told the canvas's name after each render
+    this.history = null; // the canvases' history, where the user keeps one (t-732b681a32)
   }
 
   /* Every drop on the canvas now, with its address. */
@@ -217,6 +219,22 @@ export class AgentCanvases {
 
   read(canvas, file, which = 'current') {
     try { return fs.readFileSync(path.join(this.dir(canvas), which === 'good' ? 'good' : '', file), 'utf8'); } catch (_) { return null; }
+  }
+
+  /* Every totem's script file now, as the history keeps it. */
+  snapshot(canvas) {
+    return this.layout(canvas).totems.map((t) => ({ name: t.name, file: t.file, owner: t.owner || null, script: this.read(canvas, t.file) }));
+  }
+
+  /* What the canvas was at each write NoteX kept before its history was
+   * switched on, oldest first (t-9dbb490caa). */
+  replay(canvas) {
+    let activity = [];
+    try { activity = fs.readFileSync(path.join(this.dir(canvas), 'activity.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean); } catch (_) { /* none */ }
+    let assignedAt = null;
+    try { assignedAt = JSON.parse(fs.readFileSync(path.join(this.writer.canvasDir(canvas), 'agent.json'), 'utf8')).assignedAt || null; } catch (_) { /* not known */ }
+    const first = activity.find((a) => a.what === 'assigned' || a.what === 'created');
+    return replaySteps({ dir: this.dir(canvas), layout: this.layout(canvas).totems, activity, assignedAt: assignedAt || (first && first.at) || null });
   }
 
   /* Every totem's script now, in the order they are drawn. */
@@ -394,7 +412,8 @@ export class AgentCanvases {
 
     const dir = this.dir(canvas);
     fs.mkdirSync(path.join(dir, 'good'), { recursive: true });
-    const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, '-');
+    const when = this.now();
+    const stamp = new Date(when).toISOString().replace(/[:.]/g, '-');
     for (const e of built.entries) {
       if (e.drawnFrom === 'new') {
         // The script it replaces is kept among the versions before the new one takes its place.
@@ -421,6 +440,13 @@ export class AgentCanvases {
     // A totem left out holds none of its drops on the canvas now.
     const layout = { totems: built.entries.map(({ name, file, owner, at, drops }) => ({ name, file, owner: owner || null, at: at || null, drops: drops || [] })) };
     fs.writeFileSync(path.join(dir, 'layout.json'), JSON.stringify(layout, null, 2));
+    /* Kept in the canvas's history, once its scripts are all written: one
+     * commit per write that changed them, by whoever wrote. A failing commit
+     * is said, never a failed write (t-b3d20f5afa, t-6281cf4449). */
+    if (this.history && this.history.on(canvas)) {
+      const who = [...new Set(tried.map((o) => o.owner).filter(Boolean))].join(', ') || (remove.length ? 'NoteX agent' : 'NoteX');
+      try { this.history.commit(canvas, this.snapshot(canvas), { who, at: when }); } catch (e) { this.log(`Keeping ${canvas}'s history failed: ${e.message}`); }
+    }
     for (const id of new Set(built.placed)) {
       try { if (this.bronze.get(id).status !== 'placed') this.bronze.mark(id, 'placed'); } catch (_) { /* forgotten meanwhile */ }
     }
