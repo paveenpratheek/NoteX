@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { parseScript, ScriptError, LIMITS } from './script.js';
-import { layoutTotem, Refusal, move } from './layout.js';
+import { layoutTotem, Refusal, move, newIds, emitLateWires } from './layout.js';
 import { visualBox } from './measure.js';
 import { bboxDistance } from './geometry.js';
 import { magneticTotems, FIELD, CHAIN } from './rules.js';
@@ -311,13 +311,15 @@ export class AgentCanvases {
 
   /* One totem drawn onto the state: laid out where NoteX puts a new totem,
    * then moved to its pin, clear of the totems drawn before it. */
-  drawOne(canvas, fabricDir, state, text, entry, drawn) {
+  drawOne(canvas, fabricDir, state, text, entry, drawn, newId = undefined) {
     const parsed = parseScript(text);
     if (parsed.kind !== 'totem') throw new Refusal(`${canvas} is an agent canvas, drawn from whole totem scripts.`);
     if (norm(parsed.canvas) !== norm(canvas)) throw new Refusal(`the script is for ${parsed.canvas}, not ${canvas}.`, parsed.totem);
     if (norm(parsed.totem.attrs.name) !== norm(entry.name)) throw new Refusal(`the script's totem is "${parsed.totem.attrs.name}", but it is kept as "${entry.name}".`, parsed.totem);
     const drops = this.resolveDrops(parsed, canvas);
-    const out = layoutTotem(parsed, state, { owner: entry.owner || 'agent', fabricDir, agentCanvas: true });
+    // Links into other totems are held back until every totem is drawn (t-495f823875).
+    const late = [];
+    const out = layoutTotem(parsed, state, { owner: entry.owner || 'agent', fabricDir, agentCanvas: true, lateWires: late, ...(newId ? { newId } : {}) });
     const mine = new Set(out.written);
     const items = Object.entries(KIND).flatMap(([k, kind]) => (state[k] || []).filter((x) => mine.has(x.id)).map((x) => ({ x, kind })));
     // The pin is the corner of the totem's items; an empty totem, until now
@@ -335,7 +337,7 @@ export class AgentCanvases {
       for (const b of out.boxes) b.at = at;
       drawn.push(shifted(at));
     }
-    return { out, at, drops, mine };
+    return { out, at, drops, mine, late };
   }
 
   /* The canvas's content rebuilt from its scripts, on the state the writer
@@ -375,6 +377,7 @@ export class AgentCanvases {
     }
     const out = { written: [], touched: new Set(), removed: old, boxes: [], texts: [], copies: [], wires: [], totemId: null, check: null };
     const totems = [], drawn = [], placed = [], pushed = [];
+    const newId = newIds(); // one source of ids for every totem and the links drawn after them
     for (const e of entries) {
       const override = fresh.get(e);
       const isNew = Boolean(override);
@@ -386,7 +389,7 @@ export class AgentCanvases {
         if (text == null) { errors.push(`${which}: no script`); continue; }
         const before = JSON.stringify(Object.fromEntries(CONTENT.map((k) => [k, state[k]])));
         try {
-          done = { which, text, ...this.drawOne(canvas, fabricDir, state, text, e, drawn) };
+          done = { which, text, ...this.drawOne(canvas, fabricDir, state, text, e, drawn, newId) };
           break;
         } catch (err) {
           if (!(err instanceof ScriptError || err instanceof Refusal)) throw err;
@@ -403,6 +406,7 @@ export class AgentCanvases {
       e.drawnFrom = done.which;
       e.text = done.text;
       e.drops = dropAddresses(parseScript(done.text));
+      e.late = done.late;
       out.written.push(...done.out.written);
       out.boxes.push(...done.out.boxes);
       out.texts.push(...done.out.texts);
@@ -411,6 +415,18 @@ export class AgentCanvases {
       totems.push({ totem: e.name, drawn: done.which, errors });
     }
     const spaced = [...new Set([...pushed, ...this.spaceOut(entries, state)])];
+    /* The links into other totems, now that every totem is drawn and spaced. One
+     * whose other end is gone refuses a script just sent; a totem drawn from its
+     * kept script is drawn without it and says so (t-495f823875). */
+    const late = entries.flatMap((e) => (e.late || []).map((w) => ({ ...w, entry: e })));
+    const links = emitLateWires(state, late, { owner: 'agent', newId });
+    for (const { wire, error } of links.failed) {
+      if (wire.entry.drawnFrom === 'new') throw error;
+      const said = totems.find((t) => t.totem === wire.entry.name);
+      if (said) said.errors.push(`a link was left out: ${error.message}`);
+    }
+    out.written.push(...links.out.written);
+    out.wires.push(...links.out.wires);
     return { out, entries, totems, placed, spaced, deleted };
   }
 

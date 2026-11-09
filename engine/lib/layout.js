@@ -497,33 +497,67 @@ export function redrawLine(scene, line) {
   return true;
 }
 
-/* An end of a wire: a box in the script, or in an <Add> a place on the
- * canvas by its full address. Its chain is the containers from the totem
- * down to it, for finding what holds the wire. */
+/* A box on the canvas by its full address as notex_read shows it, its
+ * (totem), (note) and other labels optional. */
+const segments = (s) => String(s).split('>').map((x) => norm(unlabel(x))).filter(Boolean).join(' > ');
+function placeAt(scene, ref, node, k) {
+  const all = [...scene.model.places.values()].filter((q) => q.area);
+  const exact = all.find((q) => norm(q.address) === norm(ref));
+  if (exact) return exact;
+  const fits = all.filter((q) => segments(q.address) === segments(ref));
+  if (fits.length > 1) throw new Refusal(`${k}="${ref}" fits ${fits.length} boxes (${fits.map((q) => `"${q.address}"`).join(', ')}) - give the address as notex_read shows it.`, node);
+  return fits[0] || null;
+}
+
+/* An end of a wire: a box in the script, or a place on the canvas by its
+ * full address - in an <Add>, or for a <Link> one in another totem
+ * (t-0fcfbf7f54). Its chain is the containers from its totem down to it,
+ * for finding what holds the wire. */
 function wireEnd(node, k, ctx) {
   const box = node.ends[k];
   if (box) return { id: box.id, chain: box.chain, name: box.path.join(' > ') };
-  const want = norm(node.attrs[k]);
-  const p = [...ctx.scene.model.places.values()].find((q) => norm(q.address) === want && q.area);
-  if (!p) throw new Refusal(`${k}="${node.attrs[k]}" names no box in this script and no area, note or scroll box on the canvas - give a box's name, or a place's full address.`, node);
-  if (ctx.scene.totemOf(ctx.scene.byId.get(p.id))?.id !== ctx.totemId) throw new Refusal(`${k}="${node.attrs[k]}" is in another totem - wires join boxes inside one totem.`, node);
+  const p = placeAt(ctx.scene, node.attrs[k], node, k);
+  if (!p) throw new Refusal(`${k}="${node.attrs[k]}" names no box in this script and no area, note or scroll box on the canvas - give a box's name, or a place's full address as notex_read shows it.`, node);
+  const totem = ctx.scene.totemOf(ctx.scene.byId.get(p.id));
+  // A Line is a drawing that belongs to the totem it sits in (t-d26992551e, t-3bfb83748d).
+  if (totem?.id !== ctx.totemId && node.tag !== 'Link') throw new Refusal(`${k}="${node.attrs[k]}" is in another totem - a <${node.tag}> is drawn inside one totem; join a box in another totem with <Link>.`, node);
   const chain = [];
   for (let q = p; q && q.kind !== 'totem' && q.kind !== 'fabric'; q = ctx.scene.model.places.get(q.parent)) chain.unshift(q.id);
-  return { id: p.id, chain: [`totem:${ctx.totemId}`, ...chain], name: p.address };
+  return { id: p.id, chain: [`totem:${totem ? totem.id : 'none'}`, ...chain], name: p.address };
 }
 
 function emitWires(root, ctx, out) {
   const visit = (node) => {
     for (const c of node.children || []) {
       if (c.tag !== 'Line' && c.tag !== 'Link') { visit(c); continue; }
+      // On an agent canvas, a wire to a box outside the script waits until every totem is drawn (t-495f823875).
+      if (ctx.opts.lateWires && !(c.ends.from && c.ends.to)) { ctx.opts.lateWires.push({ node: c, totemId: ctx.totemId }); continue; }
       joinBoxes(c.tag, wireEnd(c, 'from', ctx), wireEnd(c, 'to', ctx), c, ctx, out);
     }
   };
   visit(root);
 }
 
-/* A Link or a Line between two boxes side by side in one totem; its id.
- * node is the script tag a refusal names. */
+/* The wires an agent canvas's totems held back, drawn once every totem is
+ * drawn and spaced, so a totem can link to one drawn after it
+ * (t-495f823875). Each joins or fails alone: { out, failed: [{ wire, error }] }. */
+export function emitLateWires(state, wires, opts) {
+  opts = withDefaults(opts);
+  const out = output();
+  const failed = [];
+  const scene = new Scene(state);
+  for (const w of wires) {
+    const ctx = { state, opts, totemId: w.totemId, scene };
+    try { joinBoxes(w.node.tag, wireEnd(w.node, 'from', ctx), wireEnd(w.node, 'to', ctx), w.node, ctx, out); } catch (e) {
+      if (!(e instanceof Refusal)) throw e;
+      failed.push({ wire: w, error: e });
+    }
+  }
+  return { out, failed };
+}
+
+/* A Link or a Line between two boxes side by side - a Link's may be in two
+ * totems; its id. node is the script tag a refusal names. */
 function joinBoxes(tag, from, to, node, ctx, out) {
   const say = node.tag === 'ProgressBarLink' ? `the link from the progress bar's box to its note` : `<${tag}>`;
   if (from.chain.includes(to.id) || to.chain.includes(from.id)) throw new Refusal(`${say} joins "${from.name}" to a box inside it - a wire joins boxes side by side.`, node);
@@ -764,8 +798,10 @@ function removeItem(state, node, parsed, opts, out) {
   if (!e && !link) throw new Refusal(`nothing on ${parsed.canvas} has the id ${id} - notex_read shows the ids.`, node);
   const address = (areaId) => scene.model.places.get(areaId)?.address || areaId;
   const say = (item) => (state.links.includes(item) ? `the link from "${address(item.fromAreaId)}" to "${address(item.toAreaId)}"` : describe(scene, scene.byId.get(item.id)));
-  const anchor = e || scene.byId.get(link.fromAreaId);
-  const totem = anchor ? scene.totemOf(anchor) : null;
+  // A link is the agent's to remove when either end is in its own totem - it may join another (t-10924e08dd).
+  const ends = e ? [e] : [link.fromAreaId, link.toAreaId].map((a) => scene.byId.get(a)).filter(Boolean);
+  const owned = ends.map((x) => scene.totemOf(x)).filter(Boolean);
+  const totem = owned.find((t) => t.writtenBy === 'agent' && t.owner === opts.owner) || owned[0] || null;
   if (!totem || totem.writtenBy !== 'agent' || totem.owner !== opts.owner) {
     throw new Refusal(`${say(e ? e.item : link)} is ${totem && totem.owner ? `in ${totem.owner}'s totem ${totem.name}` : "the user's"} - an agent removes only from its own totem.`, node);
   }

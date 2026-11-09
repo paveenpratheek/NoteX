@@ -94,8 +94,8 @@ Later scripts can change the agent's own work:
 | `<File>` | a file or image, copied into the canvas; `drop="d-..."` places a PDF, Word file or image from the Inbox |
 | `<Image>` | a picture the agent draws: one SVG inside `<![CDATA[ ... ]]>` (at most 60 KB, no scripts, handlers or outside links), saved as `<name>.svg` on the canvas and shown as an image. Ask the agent in the chat for a diagram or chart and it draws one |
 | `<Row>` / `<Column>` | side by side / stacked inside a row |
-| `<Link>` | joins two boxes corner to corner, as the app's own links do |
-| `<Line>` | draws a line only |
+| `<Link>` | joins two boxes corner to corner, as the app's own links do; the other box may be in another totem, named by its full address (`Plan (totem) > 1. Sources`) |
+| `<Line>` | draws a line only, between two boxes of one totem |
 | `<ProgressBarLink>` | a progress bar, written inside the `<Area>` it sits in and holding a note's name: `<ProgressBarLink>Todo</ProgressBarLink>`. It shows how much of that note's `- [ ]` checklist is done. NoteX aims the bar at the note and links the box to the note when nothing joins them yet, so no line is drawn by hand. The note must be in the same totem; removing the bar takes that link with it |
 | `<Add>` / `<Edit>` / `<Remove>` | grow, reword or delete the agent's own items |
 

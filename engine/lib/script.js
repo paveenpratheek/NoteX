@@ -365,7 +365,9 @@ function checkWires(top, boxes, { allowOutside }) {
           if (f && f.many) {
             throw new ScriptError(`${k}="${c.attrs[k]}" fits ${f.many.length} boxes (${f.many.map((b) => b.path.join(' > ')).join('; ')}) - name it by its path, e.g. "${f.many[0].path.join(' > ')}".`, c.line, c.col);
           }
-          if (!f && !allowOutside) throw new ScriptError(`${k}="${c.attrs[k]}" names no <Area>, <Note> or <ScrollBox> in this script.`, c.line, c.col);
+          // A <Link> may name a box in another totem by its full address, found on the canvas (t-0fcfbf7f54).
+          const elsewhere = c.tag === 'Link' && c.attrs[k].includes('>');
+          if (!f && !allowOutside && !elsewhere) throw new ScriptError(`${k}="${c.attrs[k]}" names no <Area>, <Note> or <ScrollBox> in this script${c.tag === 'Link' ? ' - a box in another totem is named by its full address, e.g. "Plan (totem) > Sources"' : ''}.`, c.line, c.col);
           ends[k] = f ? f.box : null;
         }
         if (ends.from && ends.from === ends.to) throw new ScriptError(`<${c.tag}> joins "${c.attrs.from}" to itself.`, c.line, c.col);
