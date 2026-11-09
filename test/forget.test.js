@@ -9,7 +9,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { Writer } from '../engine/lib/writer.js';
 import { Bronze, BronzeError } from '../engine/lib/bronze.js';
-import { AgentCanvases, withoutDrop, scriptFile } from '../engine/lib/agentcanvas.js';
+import { AgentCanvases, withoutDrop } from '../engine/lib/agentcanvas.js';
+
+// A totem's file, from layout.json: named from its id since t-a484b5d0de.
+const fileOf = (data, name, canvas = 'Board') => JSON.parse(fs.readFileSync(path.join(data, 'agent-canvases', canvas, 'layout.json'), 'utf8')).totems.find((x) => x.name === name).file;
 import { DropSync } from '../engine/lib/dropsync.js';
 import { Readings } from '../engine/lib/images.js';
 import { forgetDrop } from '../engine/lib/forget.js';
@@ -75,7 +78,7 @@ test('a forgotten note leaves its script, the canvas, the backups, the drop list
   assert.ok(!fs.readFileSync(path.join(s.board, 'fabric.json'), 'utf8').includes('landlord'));
   for (const n of fs.readdirSync(backups)) assert.ok(!fs.readFileSync(path.join(backups, n), 'utf8').includes('landlord'), `backup ${n}`);
   for (const which of ['', 'good']) {
-    const text = fs.readFileSync(path.join(s.data, 'agent-canvases', 'Board', which, scriptFile('Life')), 'utf8');
+    const text = fs.readFileSync(path.join(s.data, 'agent-canvases', 'Board', which, fileOf(s.data, 'Life')), 'utf8');
     assert.ok(!text.includes(secret.id) && !text.includes('Rent'), `${which || 'current'} script`);
   }
   assert.deepEqual(s.list(), [kept.id], 'RAGX is told it is gone');
@@ -117,7 +120,7 @@ test('earlier versions keep the forgotten drop\'s id only, and are left as they 
   await s.writer.submit({ script: `<Canvas name="Board"><Totem name="T"><Note name="A" drop="${a.id}"/></Totem></Canvas>`, owner: 'claude' });
   await s.writer.submit({ script: `<Canvas name="Board"><Totem name="T"><Note name="A" drop="${a.id}"/><Note name="B" drop="${b.id}"/></Totem></Canvas>`, owner: 'claude' });
   await s.forget(a.id);
-  const vdir = path.join(s.data, 'agent-canvases', 'Board', 'versions', scriptFile('T').replace(/\.totem$/, ''));
+  const vdir = path.join(s.data, 'agent-canvases', 'Board', 'versions', fileOf(s.data, 'T').replace(/\.totem$/, ''));
   const old = fs.readdirSync(vdir).map((n) => fs.readFileSync(path.join(vdir, n), 'utf8'));
   assert.ok(old.some((v) => v.includes(a.id)), 'the id is still in the history');
   assert.ok(!old.some((v) => v.includes('first words')), 'its words never were');

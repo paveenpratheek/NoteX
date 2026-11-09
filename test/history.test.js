@@ -10,7 +10,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Writer } from '../engine/lib/writer.js';
 import { Bronze } from '../engine/lib/bronze.js';
-import { AgentCanvases, scriptFile } from '../engine/lib/agentcanvas.js';
+import { AgentCanvases } from '../engine/lib/agentcanvas.js';
 import { History, HistoryError } from '../engine/lib/history.js';
 import { startServer } from '../engine/lib/server.js';
 
@@ -156,7 +156,7 @@ test('the routes: Keep history only for an agent canvas, the commits, and the sc
   assert.equal((await call('PUT', '/api/workspace', { path: ws })).status, 200);
   const sent = await (await call('POST', '/api/scripts', { script: `<Canvas name="Board"><Totem name="Plan">${note('- [ ] one')}</Totem></Canvas>`, owner: 'claude-a' })).json();
   assert.ok(sent);
-  for (let i = 0; i < 50 && !fs.existsSync(path.join(data, 'agent-canvases', 'Board', scriptFile('Plan'))); i++) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 50 && !fs.existsSync(path.join(data, 'agent-canvases', 'Board', 'layout.json')); i++) await new Promise((r) => setTimeout(r, 50));
 
   const mine = await call('PUT', '/api/fabrics/Mine/history', { on: true });
   assert.equal(mine.status, 409);
@@ -169,7 +169,7 @@ test('the routes: Keep history only for an agent canvas, the commits, and the sc
   const h = await (await call('GET', '/api/fabrics/Board/history')).json();
   assert.deepEqual(h.commits[0].added, ['Plan']);
   const then = await (await call('GET', `/api/fabrics/Board/script?when=${encodeURIComponent(new Date(Date.now() + 60_000).toISOString())}`)).json();
-  assert.match(then.script, /<Totem name="Plan">/);
+  assert.match(then.script, /<Totem id="tm-[0-9a-f]{10}" name="Plan">/);
   assert.equal(then.by, 'claude-a');
   assert.equal((await call('GET', '/api/fabrics/Board/script?when=yesterday')).status, 400);
   const view = await (await call('GET', '/api/agent-canvases/Board')).json();

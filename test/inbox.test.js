@@ -131,7 +131,7 @@ test('the Agent canvases view: every canvas, an agent canvas\'s scripts and acti
   assert.equal(one.totems[0].name, 'RAGX');
   assert.equal(one.totems[0].drawn, 'current');
   assert.equal(one.totems[0].drops, 1);
-  assert.match(one.totems[0].script, /<Totem name="RAGX">/);
+  assert.match(one.totems[0].script, /<Totem id="tm-[0-9a-f]{10}" name="RAGX">/);
   const kinds = one.activity.map((a) => a.what);
   assert.ok(kinds.includes('render') && kinds.includes('script'));
   assert.equal(one.activity.find((a) => a.what === 'script').change, 'totem RAGX');

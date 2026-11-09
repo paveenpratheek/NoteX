@@ -9,10 +9,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { Writer } from '../engine/lib/writer.js';
 import { Bronze } from '../engine/lib/bronze.js';
-import { AgentCanvases, scriptFile } from '../engine/lib/agentcanvas.js';
+import { AgentCanvases } from '../engine/lib/agentcanvas.js';
 import { readFabric } from '../engine/lib/fabric.js';
 import { buildPlaces } from '../engine/lib/places.js';
 import { parseScript, ScriptError } from '../engine/lib/script.js';
+
+// A totem's file, from layout.json: named from its id since t-a484b5d0de.
+const fileOf = (data, name, canvas = 'Board') => JSON.parse(fs.readFileSync(path.join(data, 'agent-canvases', canvas, 'layout.json'), 'utf8')).totems.find((x) => x.name === name).file;
 
 const PDF = Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n');
 
@@ -55,7 +58,7 @@ test('a totem script on an agent canvas is kept as that totem\'s file and drawn'
   assert.equal(e.status, 'written', JSON.stringify(e.result));
   assert.deepEqual(e.result.totems, [{ totem: 'Engine', drawn: 'new', errors: [] }]);
   assert.ok(places().includes('Engine (totem) > Ingest > Todo (note)'));
-  const file = scriptFile('Engine');
+  const file = fileOf(data, 'Engine');
   const dir = path.join(data, 'agent-canvases', 'Board');
   assert.match(fs.readFileSync(path.join(dir, file), 'utf8'), /chunker/);
   assert.equal(fs.readFileSync(path.join(dir, 'good', file), 'utf8'), fs.readFileSync(path.join(dir, file), 'utf8'));
@@ -79,7 +82,7 @@ test('a new version replaces its totem, keeps the old among the versions, and le
   assert.ok(places().includes('Engine (totem) > Ingest > Todo (note)'));
   assert.ok(places().includes('Search (totem) > Hybrid'));
   assert.deepEqual(totemsAt(), before, 'a taller Engine pushes nothing sideways');
-  const versions = path.join(data, 'agent-canvases', 'Board', 'versions', scriptFile('Engine').replace(/\.totem$/, ''));
+  const versions = path.join(data, 'agent-canvases', 'Board', 'versions', fileOf(data, 'Engine').replace(/\.totem$/, ''));
   const kept = fs.readdirSync(versions);
   assert.equal(kept.length, 1);
   assert.match(fs.readFileSync(path.join(versions, kept[0]), 'utf8'), /\[ \] chunker/);
@@ -115,7 +118,7 @@ test('a script that no longer draws is drawn from its last good version, and the
   await writer.submit({ script: totem('Engine', '<Area name="Ingest"><Text>x</Text></Area>'), owner: 'claude' });
   await writer.submit({ script: totem('Search', '<Area name="Hybrid"><Text>y</Text></Area>'), owner: 'claude' });
   // Someone edits the Engine script by hand and breaks it.
-  fs.writeFileSync(path.join(data, 'agent-canvases', 'Board', scriptFile('Engine')), '<Canvas name="Board"><Totem name="Engine"><Area name="Ingest">');
+  fs.writeFileSync(path.join(data, 'agent-canvases', 'Board', fileOf(data, 'Engine')), '<Canvas name="Board"><Totem name="Engine"><Area name="Ingest">');
   const r = await writer.serial(() => agent.render('Board'));
   assert.equal(r.totems.find((x) => x.totem === 'Engine').drawn, 'good');
   assert.match(r.totems.find((x) => x.totem === 'Engine').errors[0], /^current: /);
@@ -124,7 +127,7 @@ test('a script that no longer draws is drawn from its last good version, and the
   assert.ok(places().includes('Search (totem) > Hybrid'));
   assert.ok(logs.some((m) => /Engine drawn from its last good script/.test(m)));
   // With its good copy gone too, it is left out and the rest still draws.
-  fs.rmSync(path.join(data, 'agent-canvases', 'Board', 'good', scriptFile('Engine')));
+  fs.rmSync(path.join(data, 'agent-canvases', 'Board', 'good', fileOf(data, 'Engine')));
   const r2 = await writer.serial(() => agent.render('Board'));
   assert.equal(r2.totems.find((x) => x.totem === 'Engine').drawn, 'none');
   assert.ok(!places().some((a) => a.startsWith('Engine')));

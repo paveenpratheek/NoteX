@@ -53,5 +53,7 @@ export const FORMAT = [
   'Write < as &lt; and & as &amp; in text, or wrap text in <![CDATA[ ... ]]>. Two boxes side by side need different names.',
   // An agent canvas is drawn from one script per totem (t-c42859ce48); drops come from the Inbox (t-2fa309e6c8).
   'On an agent canvas (notex_canvases marks them) the scripts are the canvas: notex_read gives each totem\'s whole script. To change a totem, send its whole <Canvas><Totem> script again with your change - it replaces the old one; <Add>, <Edit> and <Remove> are refused there.',
+  // A totem's lasting id, so a rename stays the same totem (t-8464839f1d).
+  'Keep the id="tm-..." on its <Totem> tag: a script with that id replaces that totem, so changing its name renames it. A new totem has no id; NoteX gives it one.',
   'Something the user dropped in NoteX\'s Inbox is placed by its drop id: <Note name="..." drop="d-..."/> or <Text drop="d-..."/> for typed text and Markdown, <File drop="d-..."/> for a PDF, Word file or image - only on the agent canvas the user chose for that drop.',
 ].join('\n');

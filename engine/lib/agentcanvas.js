@@ -11,6 +11,11 @@
  *
  * An agent changes an agent canvas only by sending a whole <Totem> script,
  * which replaces the totem of that name, and only if it draws (t-c42859ce48).
+ * Each totem has a lasting id, tm-<10 hex>, which every script NoteX keeps
+ * and shows carries as <Totem id="...">: a script with it replaces that
+ * totem, so a new name renames it in the same file. A new totem's file is
+ * named from its id; one made before ids keeps its file (t-a484b5d0de,
+ * t-8464839f1d, t-1e19478c43).
  * Every render rebuilds the canvas's content from all its scripts in order,
  * each totem moved to its pinned place and pushed right only when it would
  * come within 800 px of one drawn before it (t-0b88e8ea91). A script that no
@@ -84,8 +89,24 @@ export function withoutDrop(text, id) {
   return out;
 }
 
-/* A totem's file: its name made safe, with a hash so two names that make
- * the same safe name stay apart. */
+/* A totem's lasting id, set when it is made (t-a484b5d0de). One made before
+ * ids has one worked out from its file name, the same at every read, so its
+ * file never moves (t-1e19478c43). */
+export const TOTEM_ID = /^tm-[0-9a-f]{10}$/;
+export const newTotemId = () => `tm-${crypto.randomBytes(5).toString('hex')}`;
+export const totemId = (t) => (t.id && TOTEM_ID.test(t.id) ? t.id : `tm-${crypto.createHash('sha1').update(String(t.file)).digest('hex').slice(0, 10)}`);
+
+/* The script with its totem's id on the <Totem> tag, in place of any other
+ * (t-8464839f1d): the name stays a line inside the script, and the id says
+ * which totem it is. */
+export function withId(text, id) {
+  if (text == null) return text;
+  return String(text).replace(/<Totem\b((?:[^>"]|"[^"]*")*?)(\/?)>/, (m, attrs, slash) => `<Totem id="${id}"${attrs.replace(/\s+id="[^"]*"/, '')}${slash}>`);
+}
+
+/* A totem's file before ids: its name made safe, with a hash so two names
+ * that make the same safe name stay apart. Totems made since are named
+ * from their id. */
 export function scriptFile(name) {
   const safe = String(name).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60) || 'totem';
   return `${safe}.${crypto.createHash('sha1').update(norm(name)).digest('hex').slice(0, 8)}.totem`;
@@ -148,7 +169,7 @@ export class AgentCanvases {
       let versions = 0;
       try { versions = fs.readdirSync(path.join(this.dir(canvas), 'versions', t.file.replace(/\.totem$/, ''))).length; } catch (_) { /* none */ }
       const r = last && last.totems.find((x) => x.totem === t.name);
-      return { name: t.name, owner: t.owner || null, script: this.read(canvas, t.file), versions, good: this.read(canvas, t.file, 'good') !== null,
+      return { id: t.id, name: t.name, owner: t.owner || null, script: withId(this.read(canvas, t.file), t.id), versions, good: this.read(canvas, t.file, 'good') !== null,
         drawn: r ? r.drawn : null, errors: r ? r.errors : [], drops: (t.drops || []).length };
     });
   }
@@ -214,7 +235,9 @@ export class AgentCanvases {
   dir(canvas) { return path.join(this.root, canvas); }
 
   layout(canvas) {
-    try { return JSON.parse(fs.readFileSync(path.join(this.dir(canvas), 'layout.json'), 'utf8')); } catch (_) { return { totems: [] }; }
+    let l;
+    try { l = JSON.parse(fs.readFileSync(path.join(this.dir(canvas), 'layout.json'), 'utf8')); } catch (_) { return { totems: [] }; }
+    return { ...l, totems: (l.totems || []).map((t) => ({ ...t, id: totemId(t) })) };
   }
 
   read(canvas, file, which = 'current') {
@@ -223,7 +246,7 @@ export class AgentCanvases {
 
   /* Every totem's script file now, as the history keeps it. */
   snapshot(canvas) {
-    return this.layout(canvas).totems.map((t) => ({ name: t.name, file: t.file, owner: t.owner || null, script: this.read(canvas, t.file) }));
+    return this.layout(canvas).totems.map((t) => ({ id: t.id, name: t.name, file: t.file, owner: t.owner || null, script: this.read(canvas, t.file) }));
   }
 
   /* What the canvas was at each write NoteX kept before its history was
@@ -237,9 +260,10 @@ export class AgentCanvases {
     return replaySteps({ dir: this.dir(canvas), layout: this.layout(canvas).totems, activity, assignedAt: assignedAt || (first && first.at) || null });
   }
 
-  /* Every totem's script now, in the order they are drawn. */
+  /* Every totem's script now, in the order they are drawn, with its id on
+   * <Totem> for an agent to keep when it sends the script back. */
   scripts(canvas) {
-    return this.layout(canvas).totems.map((t) => ({ name: t.name, owner: t.owner || null, script: this.read(canvas, t.file) }));
+    return this.layout(canvas).totems.map((t) => ({ id: t.id, name: t.name, owner: t.owner || null, script: withId(this.read(canvas, t.file), t.id) }));
   }
 
   /* --------------------------------------------------------------- drops */
@@ -293,7 +317,7 @@ export class AgentCanvases {
     if (norm(parsed.canvas) !== norm(canvas)) throw new Refusal(`the script is for ${parsed.canvas}, not ${canvas}.`, parsed.totem);
     if (norm(parsed.totem.attrs.name) !== norm(entry.name)) throw new Refusal(`the script's totem is "${parsed.totem.attrs.name}", but it is kept as "${entry.name}".`, parsed.totem);
     const drops = this.resolveDrops(parsed, canvas);
-    const out = layoutTotem(parsed, state, { owner: entry.owner || 'agent', fabricDir });
+    const out = layoutTotem(parsed, state, { owner: entry.owner || 'agent', fabricDir, agentCanvas: true });
     const mine = new Set(out.written);
     const items = Object.entries(KIND).flatMap(([k, kind]) => (state[k] || []).filter((x) => mine.has(x.id)).map((x) => ({ x, kind })));
     // The pin is the corner of the totem's items; an empty totem, until now
@@ -326,15 +350,36 @@ export class AgentCanvases {
     const all = this.layout(canvas).totems.map((t) => ({ ...t }));
     const entries = all.filter((t) => !gone.has(norm(t.name)));
     const deleted = all.filter((t) => gone.has(norm(t.name)));
-    const fresh = new Map(overrides.map((o) => [norm(o.name), o]));
-    for (const o of overrides) if (!entries.some((e) => norm(e.name) === norm(o.name))) entries.push({ name: o.name, file: scriptFile(o.name), owner: o.owner, at: null });
+    /* Each new script to the totem it replaces: by its id, so a new name
+     * renames that totem in its own file; without an id, by its name, as
+     * before ids; else a new totem, its file named from a new id
+     * (t-8464839f1d, t-a484b5d0de). */
+    const fresh = new Map();
+    const keep = ' - keep the id notex_read gives on <Totem>, or leave id out for a new totem.';
+    for (const o of overrides) {
+      let e;
+      if (o.id) {
+        if (!TOTEM_ID.test(o.id)) throw new Refusal(`"${o.id}" is not a totem id${keep}`);
+        e = entries.find((x) => x.id === o.id);
+        if (!e) throw new Refusal(`no totem on ${canvas} has the id ${o.id}${deleted.some((x) => x.id === o.id) ? ' - it is being deleted' : ''}${keep}`);
+        // Two totems with one name could not be told apart by their places (t-6dd60cbf5f).
+        const clash = entries.find((x) => x !== e && norm(x.name) === norm(o.name));
+        if (clash) throw new Refusal(`the totem "${e.name}" cannot be renamed "${o.name}": another totem on ${canvas} is called that.`);
+        if (e.name !== o.name) { e.renamedFrom = e.name; e.name = o.name; }
+      } else {
+        e = entries.find((x) => norm(x.name) === norm(o.name));
+        if (!e) { const id = newTotemId(); e = { id, name: o.name, file: `${id}.totem`, owner: o.owner, at: null }; entries.push(e); }
+      }
+      if (fresh.has(e)) throw new Refusal(`the totem "${o.name}" came twice - send each totem once.`);
+      fresh.set(e, o);
+    }
     const out = { written: [], touched: new Set(), removed: old, boxes: [], texts: [], copies: [], wires: [], totemId: null, check: null };
     const totems = [], drawn = [], placed = [], pushed = [];
     for (const e of entries) {
-      const override = fresh.get(norm(e.name));
+      const override = fresh.get(e);
       const isNew = Boolean(override);
       if (isNew) e.owner = override.owner;
-      const tries = isNew ? [['new', override.script]] : [['current', this.read(canvas, e.file)], ['good', this.read(canvas, e.file, 'good')]];
+      const tries = isNew ? [['new', withId(override.script, e.id)]] : [['current', this.read(canvas, e.file)], ['good', this.read(canvas, e.file, 'good')]];
       const errors = [];
       let done = null;
       for (const [which, text] of tries) {
@@ -438,8 +483,9 @@ export class AgentCanvases {
       for (const f of [path.join(dir, e.file), path.join(dir, 'good', e.file)]) fs.rmSync(f, { force: true });
     }
     // A totem left out holds none of its drops on the canvas now.
-    const layout = { totems: built.entries.map(({ name, file, owner, at, drops }) => ({ name, file, owner: owner || null, at: at || null, drops: drops || [] })) };
+    const layout = { totems: built.entries.map(({ id, name, file, owner, at, drops }) => ({ id, name, file, owner: owner || null, at: at || null, drops: drops || [] })) };
     fs.writeFileSync(path.join(dir, 'layout.json'), JSON.stringify(layout, null, 2));
+    for (const e of built.entries) if (e.renamedFrom) this.note(canvas, 'renamed', { id: e.id, from: e.renamedFrom, to: e.name });
     /* Kept in the canvas's history, once its scripts are all written: one
      * commit per write that changed them, by whoever wrote. A failing commit
      * is said, never a failed write (t-b3d20f5afa, t-6281cf4449). */
@@ -477,7 +523,7 @@ export class AgentCanvases {
       return finish('refused', { message: `${entry.canvas} is an agent canvas, drawn from whole totem scripts - ${tag} cannot change it. Read the totem's script, change it, and send the whole <Totem> script again; it replaces the old one.` });
     }
     try {
-      const r = this.render(entry.canvas, { override: { name: parsed.totem.attrs.name, script: entry.script, owner: entry.owner } });
+      const r = this.render(entry.canvas, { override: { name: parsed.totem.attrs.name, id: parsed.totem.attrs.id || null, script: entry.script, owner: entry.owner } });
       if (r === null) return false;
       return finish('written', r);
     } catch (e) {

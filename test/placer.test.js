@@ -79,7 +79,7 @@ test('a queued drop is placed into the totem the model chose, and the model saw 
   assert.ok(s.places().includes('RAGX (totem) > Bugs > Figures (note)'));
   const { prompt, model } = s.asked[0];
   assert.equal(model, 'sonnet');
-  assert.ok(prompt.includes(ENGINE), 'the canvas as its scripts');
+  assert.ok(prompt.replace(/ id="tm-[0-9a-f]{10}"/g, '').includes(ENGINE), 'the canvas as its scripts');
   assert.ok(prompt.includes('Figures on scanned pages are missed') && prompt.includes('from Thursday'), 'the drop\'s words and note');
   assert.equal(s.placer.tick(), null, 'nothing more to place');
 });

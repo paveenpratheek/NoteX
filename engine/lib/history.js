@@ -30,13 +30,15 @@ function changes(before, after) {
   const added = after.filter((t) => !was.has(t.file)).map((t) => t.name);
   const changed = after.filter((t) => was.has(t.file) && was.get(t.file).script !== t.script).map((t) => t.name);
   const deleted = before.filter((t) => !now.has(t.file)).map((t) => t.name);
-  const order = (s) => JSON.stringify(s.map((t) => [t.file, t.owner || null]));
-  return { added, changed, deleted, same: !added.length && !changed.length && !deleted.length && order(before) === order(after) };
+  // A totem keeps its file when renamed (t-a484b5d0de), so a rename is the same file under a new name (t-adc221f8f3).
+  const renamed = after.filter((t) => was.has(t.file) && was.get(t.file).name !== t.name).map((t) => ({ from: was.get(t.file).name, to: t.name }));
+  const order = (s) => JSON.stringify(s.map((t) => [t.file, t.name, t.owner || null]));
+  return { added, changed, deleted, renamed, same: !added.length && !changed.length && !deleted.length && order(before) === order(after) };
 }
 
 function headline(who, c) {
   const part = (word, names) => (names.length ? `${word.toLowerCase()} ${names.join(', ')}` : null);
-  const what = [part(ADDED, c.added), part(CHANGED, c.changed), part(DELETED, c.deleted)].filter(Boolean).join('; ');
+  const what = [...c.renamed.map((r) => `renamed ${r.from} to ${r.to}`), part(ADDED, c.added), part(CHANGED, c.changed), part(DELETED, c.deleted)].filter(Boolean).join('; ');
   return `${who}: ${what || 'the totems in a new order'}`.slice(0, 200);
 }
 
@@ -121,10 +123,10 @@ export class History {
     fs.writeFileSync(path.join(dir, 'totems.json'), JSON.stringify(snap.map(({ name, file, owner }) => ({ name, file, owner })), null, 2) + '\n');
     const author = String(who || 'NoteX').replace(/[<>\n]/g, ' ').trim() || 'NoteX';
     const iso = new Date(at).toISOString();
-    const message = `${headline(author, c)}\n\nAt: ${iso}\nChange: ${JSON.stringify({ added: c.added, changed: c.changed, deleted: c.deleted })}\n`;
+    const message = `${headline(author, c)}\n\nAt: ${iso}\nChange: ${JSON.stringify({ added: c.added, changed: c.changed, deleted: c.deleted, renamed: c.renamed })}\n`;
     this.git(dir, ['add', '-A']);
     this.git(dir, ['commit', '-q', '--allow-empty', '-F', '-'], { author, at, input: message });
-    return { at: iso, who: author, added: c.added, changed: c.changed, deleted: c.deleted };
+    return { at: iso, who: author, added: c.added, changed: c.changed, deleted: c.deleted, renamed: c.renamed };
   }
 
   /* ------------------------------------------------------------- reading */
@@ -140,7 +142,7 @@ export class History {
     return out.split('\x1e').filter((s) => s.trim()).map((rec) => {
       const [commit, who, body] = rec.split('\x1f');
       const at = /^At: (.+)$/m.exec(body || '');
-      let change = { added: [], changed: [], deleted: [] };
+      let change = { added: [], changed: [], deleted: [], renamed: [] };
       const m = /^Change: (.+)$/m.exec(body || '');
       if (m) { try { change = { ...change, ...JSON.parse(m[1]) }; } catch (_) { /* kept as none */ } }
       return { commit: commit.trim(), at: at ? at[1].trim() : null, who, ...change };
@@ -253,11 +255,13 @@ export function replaySteps({ dir, layout, activity = [], assignedAt = null }) {
     const owner = now ? now.owner || null : null;
     let nowText = null;
     if (now) { try { nowText = fs.readFileSync(path.join(dir, file), 'utf8'); } catch (_) { /* no file */ } }
-    const put = (at, script, who) => events.push({ at, file, name, owner, script, who });
+    // Each version under the name its own script gives, so a renamed totem is one file all along (t-adc221f8f3).
+    const put = (at, script, who) => events.push({ at, file, name: (script && totemName(script)) || name, owner, script, who });
+    const nameOf = (script) => (script && totemName(script)) || name;
     // A script that follows nothing - the first, or one after a deletion -
     // starts at its first write, else just after what came before it.
     const begin = (from, until, script) => {
-      const w = firstWrite(name, from, until);
+      const w = firstWrite(nameOf(script), from, until);
       const t0 = w ? w.at : from > -Infinity ? from + 1 : origin != null && origin < until ? origin : until - 1;
       if (Number.isFinite(t0)) put(t0, script, w ? w.who : null);
     };
@@ -267,9 +271,9 @@ export function replaySteps({ dir, layout, activity = [], assignedAt = null }) {
       // v.text stood until v.at.
       if (i === 0 || versions[i - 1].deleted) begin(i === 0 ? -Infinity : versions[i - 1].at, v.at, v.text);
       const next = versions[i + 1];
-      if (v.deleted) put(v.at, null, writer(name, v.at));
-      else if (next) put(v.at, next.text, writer(name, v.at));
-      else put(v.at, nowText, writer(name, v.at)); // the script now, or gone with nothing kept
+      if (v.deleted) put(v.at, null, writer(nameOf(v.text), v.at));
+      else if (next) put(v.at, next.text, writer(nameOf(next.text), v.at));
+      else put(v.at, nowText, writer(nameOf(nowText || v.text), v.at)); // the script now, or gone with nothing kept
     });
     // Made again after its last deletion: the script now, from its first write after it.
     const last = versions[versions.length - 1];

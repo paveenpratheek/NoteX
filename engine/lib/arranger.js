@@ -10,8 +10,8 @@
  * are drawn in one render, so they land together or not at all
  * (t-b5d4a34951). A refused answer is asked for once more with the reason.
  *
- * One ask at a time. A totem cannot be renamed by an ask: one the answer
- * leaves out stays as it is. What the user asks to delete can go
+ * One ask at a time. A totem the answer leaves out stays as it is; one it
+ * sends with its id and a new name is renamed (t-eed42f9e1c). What the user asks to delete can go
  * (t-44045fd69e): a whole totem by <Delete totem>, or items left out of a
  * totem's script and each named in a <Delete> tag; anything else lost is
  * still refused, and so is any deleting the user's message did not ask for.
@@ -143,6 +143,7 @@ export function extractScripts(text) {
  * that the canvas held - but for what deletes names, when the user's
  * message asked for deleting (askedToDelete). */
 export function checkArrangement(scripts, canvas, before, deletes = [], askedToDelete = false) {
+  const pairs = (o, s) => (o.id ? o.id === s.id : norm(o.name) === norm(s.name));
   if (!scripts.length && !deletes.length) return { reason: 'the answer held no ```xml block with a <Canvas> script.' };
   if (deletes.length && !askedToDelete) return { reason: 'it deletes things, but the user did not ask for anything to be deleted - keep everything, and delete only when the user asks.' };
   const goneTotems = deletes.filter((d) => d.kind === 'totem').map((d) => d.value);
@@ -154,9 +155,13 @@ export function checkArrangement(scripts, canvas, before, deletes = [], askedToD
     if (parsed.kind !== 'totem') return { reason: 'every script must be one whole <Canvas><Totem> script.' };
     if (norm(parsed.canvas) !== norm(canvas)) return { reason: `a script is for the canvas "${parsed.canvas}", but this is "${canvas}".` };
     const name = parsed.totem.attrs.name;
-    if (overrides.some((o) => norm(o.name) === norm(name))) return { reason: `the totem "${name}" came twice - send each totem once.` };
-    if (goneTotems.some((t) => norm(t) === norm(name))) return { reason: `the totem "${name}" is both deleted and sent - send it, or delete it, not both.` };
-    overrides.push({ name, script, parsed });
+    const id = parsed.totem.attrs.id || null;
+    // Paired with the totem it replaces by id first, so a rename cannot hide a loss (t-eed42f9e1c).
+    if (id && !before.some((s) => s.id === id)) return { reason: `<Totem id="${id}"> names no totem on the canvas - keep each totem's id as it is, and give a new totem none.` };
+    const was = before.find((s) => pairs({ id, name }, s));
+    if (overrides.some((o) => (id && o.id === id) || norm(o.name) === norm(name))) return { reason: `the totem "${name}" came twice - send each totem once.` };
+    if (goneTotems.some((t) => norm(t) === norm(name) || (was && norm(t) === norm(was.name)))) return { reason: `the totem "${name}" is both deleted and sent - send it, or delete it, not both.` };
+    overrides.push({ name, id, script, parsed });
   }
   const had = [], has = [];
   const gone = []; // what the deleted totems held: all of it goes
@@ -167,7 +172,7 @@ export function checkArrangement(scripts, canvas, before, deletes = [], askedToD
     const items = heldDetails(parsed);
     if (goneTotems.some((t) => norm(t) === norm(s.name))) { gone.push(...items); continue; }
     had.push(...items);
-    if (!overrides.some((o) => norm(o.name) === norm(s.name))) has.push(...items.map((d) => d.key));
+    if (!overrides.some((o) => pairs(o, s))) has.push(...items.map((d) => d.key));
   }
   for (const o of overrides) has.push(...heldItems(o.parsed));
   // Each item lost, once for every copy of it that went; each must be one a <Delete> names.
@@ -188,7 +193,7 @@ export function checkArrangement(scripts, canvas, before, deletes = [], askedToD
   }
   const deleted = [...gone, ...lost];
   return {
-    overrides: overrides.map(({ name, script }) => ({ name, script, owner: OWNER })),
+    overrides: overrides.map(({ name, id, script }) => ({ name, id, script, owner: OWNER })),
     removeTotems: before.filter((s) => goneTotems.some((t) => norm(t) === norm(s.name))).map((s) => s.name),
     deleted: deleted.map((d) => d.key),
     deletedDrops: [...new Set(deleted.filter((d) => d.drop).map((d) => d.drop))],
@@ -224,7 +229,7 @@ export function buildArrangePrompt({ canvas, scripts, ask, retry = null, drops =
     'If it asks for the canvas to change, also add one whole <Canvas name="' + canvas + '"><Totem name="...">...</Totem></Canvas> script, in its own ```xml block, for each totem you change or start. A totem you leave out stays as it is.',
     '- Keep everything the canvas holds - every note\'s words, every text, every file and every drop="..." - somewhere on the canvas, word for word. You may move it between boxes and totems, and make, rename, regroup or remove boxes.',
     '- Delete only what the user\'s message asks you to delete. Then send the totem\'s script without it, and name each thing deleted in one more ```xml block of its own, <Canvas name="' + canvas + '"><Delete note="the note\'s name"/><Delete text="the text\'s first words"/><Delete drop="d-..."/><Delete image="the image\'s name"/><Delete file="the file\'s name"/></Canvas>. To delete a whole totem with everything in it, put <Delete totem="its name"/> there and send no script for it. Anything left out but not named is refused.',
-    '- Keep the names of the totems that are there: a totem cannot be renamed. To empty one, move what it holds into others and send it with what is left.',
+    '- Keep each totem\'s id="..." on its <Totem> tag. To rename a totem, keep its id and change its name; a new totem has no id. To empty one, move what it holds into others and send it with what is left.',
     '- Keep each drop="d-..." on the same kind of tag it is on now.',
     '- When the user asks for a picture - a diagram, a chart, a sketch - draw it as an <Image name="..."> holding one SVG in <![CDATA[ ... ]]>, and copy any <Image> already there exactly.',
     '- If the request asks for something you cannot do this way, do what you can and keep the rest as it is.',

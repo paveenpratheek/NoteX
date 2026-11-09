@@ -36,7 +36,7 @@ async function setup(t) {
   const answers = [];
   const run = async (req) => { asked.push(req); const a = answers.shift(); if (a instanceof Error) throw a; return { text: a }; };
   const arranger = new Arranger({ config, dataDir: data, writer, run });
-  const script = (name) => writer.agent.scripts('Board').find((s) => s.name === name).script;
+  const script = (name) => writer.agent.scripts('Board').find((s) => s.name === name).script.replace(/ id="tm-[0-9a-f]{10}"/g, '');
   return { ws, data, config, writer, arranger, asked, answers, script };
 }
 
@@ -70,7 +70,7 @@ test('an ask rewrites the totems it names in one render, and the model saw the c
   assert.equal(r.status, 'done', r.detail);
   assert.deepEqual(r.totems, ['Bugs', 'Ideas']);
   assert.equal(s.asked[0].model, 'opus');
-  assert.ok(s.asked[0].prompt.includes(BUGS) && s.asked[0].prompt.includes('move the figures bug to ideas'));
+  assert.ok(s.asked[0].prompt.replace(/ id="tm-[0-9a-f]{10}"/g, '').includes(BUGS) && s.asked[0].prompt.includes('move the figures bug to ideas'));
   assert.equal(s.script('Bugs'), bugs);
   assert.equal(s.script('Ideas'), ideas);
   const act = s.writer.agent.activity('Board');

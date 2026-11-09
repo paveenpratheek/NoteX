@@ -43,7 +43,8 @@ const TAGS = {
   Edit: { attrs: { id: true, name: false }, holds: 'text' },
   // Takes an agent's own item off the canvas, with what is inside it (t-1ca15af044, t-5d426facf3).
   Remove: { attrs: { id: true }, holds: 'nothing' },
-  Totem: { attrs: { name: true }, holds: 'tags' },
+  // id: an agent canvas's lasting id for the totem, which a script keeps to replace it (t-8464839f1d).
+  Totem: { attrs: { name: true, id: false }, holds: 'tags' },
   // One level under a totem: a book's chapters, a game's cars (t-64e1acbf09).
   SubTotem: { attrs: { name: true }, holds: 'tags' },
   Area: { attrs: { name: true }, holds: 'tags' },
@@ -237,7 +238,9 @@ function build(tokens) {
     const attrs = {};
     for (const a of t.attrs) {
       const name = a.name.toLowerCase();
-      if ((name === 'id' && tag !== 'Edit' && tag !== 'Remove') || name === 'owner') {
+      // An agent canvas's totem id (tm-...) is NoteX's own and goes back in, so a rename stays the same totem (t-8464839f1d).
+      const totemId = name === 'id' && tag === 'Totem' && /^tm-[0-9a-f]{10}$/.test(a.value);
+      if ((name === 'id' && tag !== 'Edit' && tag !== 'Remove' && !totemId) || name === 'owner') {
         // A read-out's ids and owners are never written back (t-bb0a5fdf1f).
         throw new ScriptError(`<${tag}> takes no ${name} - ids and owners come from NoteX. To change something already written, use <Edit id="..."> inside <Canvas>.`, t.line, t.col);
       }

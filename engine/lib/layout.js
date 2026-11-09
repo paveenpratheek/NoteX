@@ -626,6 +626,8 @@ export function layoutTotem(parsed, state, opts) {
   prepare(state);
   const before = checkCanvas(state, buildPlaces({ name: 'canvas', state }));
   const name = parsed.totem.attrs.name;
+  // On the user's own canvases a totem's id is File Fabric's, never one a script gives (t-6dd60cbf5f).
+  if (parsed.totem.attrs.id && !opts.agentCanvas) throw new Refusal('<Totem id> is only for agent canvases, where it names the totem a script replaces - leave id out here.', parsed.totem);
   if ((state.totems || []).some((t) => norm(t.name) === norm(name))) throw new Refusal(`a totem called "${name}" is already on this canvas - give yours another name, or <Add> to it.`, parsed.totem);
   const scene = new Scene(state);
   const ctx = { state, opts, textMax: M.TEXT_WIDTH };

@@ -87,7 +87,7 @@ test('deleting a whole totem: gone from the canvas, its script kept among its ve
   assert.equal(JSON.stringify(s.fabric()).includes('time windows for search'), false);
   const vdir = path.join(s.writer.agent.dir('Board'), 'versions');
   const kept = fs.readdirSync(vdir).flatMap((d) => fs.readdirSync(path.join(vdir, d)).map((f) => fs.readFileSync(path.join(vdir, d, f), 'utf8')));
-  assert.ok(kept.includes(IDEAS), 'the deleted script is kept');
+  assert.ok(kept.map((k) => k.replace(/ id="tm-[0-9a-f]{10}"/g, '')).includes(IDEAS), 'the deleted script is kept');
   assert.ok(s.writer.agent.activity('Board').some((a) => a.what === 'deleted'));
 });
 
