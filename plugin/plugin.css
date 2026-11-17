@@ -338,3 +338,87 @@ button.switch[aria-checked="true"]::before { background: var(--accent); }
   .places .tree { max-height: 320px; }
   .view { min-height: 420px; }
 }
+
+/* ------------------------------------------------------------------
+ * Inside CanvasX Studio (t-aeaee2defb): AutomatU's look - flat white
+ * sheets with hairlines, a crumb over a serif title, segmented tabs,
+ * near-black buttons, Geist and Source Serif 4. Only when the studio's
+ * host marks the page data-host="canvasx-studio"; ter-manager never does,
+ * so there the glass above is all there is. The palette is the host's.
+ * ------------------------------------------------------------------ */
+:root[data-host="canvasx-studio"] {
+  --sheet: var(--raise); --bar: transparent; --card: var(--raise); --well: var(--raise);
+  --chip: color-mix(in srgb, var(--fg) 5%, var(--raise)); --raised: color-mix(in srgb, var(--fg) 3%, var(--raise));
+  --rim: transparent; --sheen: transparent; --spec: transparent; --lift: none;
+  --line: color-mix(in srgb, var(--fg) 9%, transparent); --soft: color-mix(in srgb, var(--fg) 5%, transparent);
+  --acc-soft: color-mix(in srgb, var(--fg) 8%, transparent); --acc-shadow: transparent; --acc-text: var(--fg);
+  --paper-2: color-mix(in srgb, var(--fg) 2%, var(--raise));
+  --x-sans: Geist, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --x-serif: "Source Serif 4", Georgia, serif;
+  --r-sheet: 18px; --r-card: 10px; --r-chip: 6px;
+}
+:root[data-host="canvasx-studio"] body { background: var(--raise); background-image: none; padding: 24px 28px 28px; gap: 18px; font-family: var(--x-sans); }
+:root[data-host="canvasx-studio"] .bar,
+:root[data-host="canvasx-studio"] .sheet,
+:root[data-host="canvasx-studio"] .center > .card { -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+:root[data-host="canvasx-studio"] .sheet,
+:root[data-host="canvasx-studio"] .center > .card { background: var(--raise); border: 1px solid var(--line); }
+:root[data-host="canvasx-studio"] .sheet { padding: 16px; gap: 12px; }
+
+/* The head: a crumb over a serif title, the views as segmented tabs. */
+:root[data-host="canvasx-studio"] .bar { background: none; border: 0; padding: 0; min-height: 0; align-items: flex-end; gap: 14px; }
+:root[data-host="canvasx-studio"] .brand { flex-direction: column; align-items: flex-start; gap: 4px; }
+:root[data-host="canvasx-studio"] .brand svg { display: none; }
+:root[data-host="canvasx-studio"] .tag { order: -1; padding: 0; background: none; color: var(--muted); font-size: 13px; }
+:root[data-host="canvasx-studio"] .brand strong { font: 400 32px/1.15 var(--x-serif); letter-spacing: -0.01em; }
+:root[data-host="canvasx-studio"] .seg { background: var(--chip); border: 0; border-radius: 12px; padding: 4px; gap: 2px; }
+:root[data-host="canvasx-studio"] .seg button { min-height: 32px; padding: 0 14px; border-radius: 9px; font-size: 14px; color: var(--fg-2); }
+:root[data-host="canvasx-studio"] .seg button.on { background: var(--raise); color: var(--fg); font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+:root[data-host="canvasx-studio"] .pill { background: none; border: 0; padding: 0 4px; color: var(--muted); }
+:root[data-host="canvasx-studio"] .path { background: var(--chip); }
+
+/* Buttons and fields: hairlines, near-black for the main one. */
+:root[data-host="canvasx-studio"] button { background: var(--raise); border-color: var(--line); border-radius: var(--r-card); box-shadow: none; min-height: 36px; }
+:root[data-host="canvasx-studio"] button:hover { background: var(--soft); border-color: var(--line); }
+:root[data-host="canvasx-studio"] button.primary { background: var(--accent); color: var(--on-acc); border-color: transparent; font-weight: 500; box-shadow: none; }
+:root[data-host="canvasx-studio"] button.primary:hover { opacity: .88; background: var(--accent); }
+:root[data-host="canvasx-studio"] input,
+:root[data-host="canvasx-studio"] select,
+:root[data-host="canvasx-studio"] textarea { background: var(--raise); box-shadow: none; border-radius: var(--r-card); }
+:root[data-host="canvasx-studio"] input:focus,
+:root[data-host="canvasx-studio"] select:focus,
+:root[data-host="canvasx-studio"] textarea:focus { border-color: var(--fg); outline-color: var(--soft); }
+:root[data-host="canvasx-studio"] .eyebrow { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted); }
+
+/* The canvases, as a light list the way AutomatU's sidebar lists them. */
+:root[data-host="canvasx-studio"] .fabrics { background: var(--paper-2); }
+:root[data-host="canvasx-studio"] .list button { border: 0; border-radius: 10px; padding: 8px 10px; }
+:root[data-host="canvasx-studio"] .list .name { font-weight: 400; }
+:root[data-host="canvasx-studio"] .list button.on { background: var(--acc-soft); border: 0; }
+:root[data-host="canvasx-studio"] .list button.on .name { font-weight: 500; }
+:root[data-host="canvasx-studio"] .tree button { border-radius: 9px; }
+:root[data-host="canvasx-studio"] .tree button.on { background: var(--acc-soft); box-shadow: none; font-weight: 500; }
+:root[data-host="canvasx-studio"] .tree .kind.agent { color: var(--muted); }
+:root[data-host="canvasx-studio"] .chip { background: var(--chip); }
+
+/* Titles in the serif, and a place read like a page. */
+:root[data-host="canvasx-studio"] .title-row h1 { font: 400 24px/1.25 var(--x-serif); letter-spacing: -0.01em; }
+:root[data-host="canvasx-studio"] .center > .card h2 { font: 400 24px/1.25 var(--x-serif); }
+:root[data-host="canvasx-studio"] .section { font-family: var(--x-serif); font-size: 16px; line-height: 1.6; }
+:root[data-host="canvasx-studio"] .section .head { font-family: var(--x-sans); font-size: 15px; }
+:root[data-host="canvasx-studio"] .card, :root[data-host="canvasx-studio"] .line-card { background: var(--paper-2); }
+:root[data-host="canvasx-studio"] .section.card, :root[data-host="canvasx-studio"] .doc.card { background: var(--raise); border: 1px solid var(--line); }
+
+/* Switches: green while on, as a kept canvas is. */
+:root[data-host="canvasx-studio"] button.switch[aria-checked="true"] { background: color-mix(in srgb, var(--green) 12%, var(--raise)); border-color: color-mix(in srgb, var(--green) 35%, transparent); color: color-mix(in srgb, var(--green) 75%, var(--fg)); }
+:root[data-host="canvasx-studio"] button.switch[aria-checked="true"]::before { background: var(--green); }
+
+/* The agent's chat. */
+:root[data-host="canvasx-studio"] .chat li { border-radius: 16px; font-size: 14px; }
+:root[data-host="canvasx-studio"] .chat li.user { background: var(--chip); }
+:root[data-host="canvasx-studio"] .chat li.agent { background: none; border: 1px solid var(--line); }
+:root[data-host="canvasx-studio"] .drop-zone:hover, :root[data-host="canvasx-studio"] .drop-zone.over { border-color: var(--fg); background: var(--soft); }
+:root[data-host="canvasx-studio"] .totem:hover { box-shadow: inset 0 0 0 1px var(--line); }
+@media (max-width: 900px) { :root[data-host="canvasx-studio"] body { padding: 16px; } }
+/* Rows, tabs and segments stay plain; only real buttons take the hairline. */
+:root[data-host="canvasx-studio"] .seg button, :root[data-host="canvasx-studio"] .list button, :root[data-host="canvasx-studio"] .tree button, :root[data-host="canvasx-studio"] .popover button, :root[data-host="canvasx-studio"] button.link { background: transparent; border-color: transparent; }
