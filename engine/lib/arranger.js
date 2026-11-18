@@ -325,7 +325,7 @@ export class Arranger {
         const prompt = buildArrangePrompt({ canvas: job.canvas, scripts: before, ask: job.ask, retry: reason, drops, skipped, history: job.history, attached });
         answer = await this.run({ prompt, images, system: SYSTEM, model: job.model, dataDir: this.dataDir });
       } catch (e) {
-        if (e instanceof ClaudeError && ['not-logged-in', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) return this.finish(job, 'failed', e.message);
+        if (e instanceof ClaudeError && ['not-logged-in', 'billing', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) return this.finish(job, 'failed', e.message);
         reason = e.message;
         continue;
       }

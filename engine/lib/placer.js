@@ -281,7 +281,7 @@ export class Placer {
         const prompt = buildPrompt({ drops, files, canvas: byMessage ? null : lead.canvas, scripts, canvases, ask: lead.ask, dataDir: this.dataDir, retry: reason, shown, skipped });
         answer = await this.run({ prompt, images, system: SYSTEM, model, dataDir: this.dataDir });
       } catch (e) {
-        if (e instanceof ClaudeError && ['not-logged-in', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) {
+        if (e instanceof ClaudeError && ['not-logged-in', 'billing', 'limit', 'not-found', 'unsafe-folder'].includes(e.code)) {
           this.holdUntil = this.now() + HOLD_MS;
           this.held = e.message;
           for (const d of drops) this.safeMark(d.id, 'queued', `Waiting: ${e.message}`);

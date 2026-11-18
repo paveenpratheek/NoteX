@@ -41,7 +41,7 @@ export async function readFabricImages(dir, { dataDir, ragx = null, atOnce = REA
         result.read++;
       } catch (e) {
         // RAGX gone or out of Claude: the rest would fail the same way, so stop asking.
-        if (['ragx-down', 'limit', 'not-logged-in'].includes(e.code) || /usage limit|not logged in/i.test(e.message)) result.stopped = e.message;
+        if (['ragx-down', 'limit', 'not-logged-in', 'billing'].includes(e.code) || /usage limit|not logged in|past due|claude\.ai\/settings\/billing/i.test(e.message)) result.stopped = e.message;
         else result.failed.push({ name, error: e.message });
       }
       onProgress({ done: result.read, total: todo.length, failed: result.failed.length });

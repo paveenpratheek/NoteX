@@ -19,7 +19,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 export class ClaudeError extends Error {
-  constructor(code, message) { super(message); this.name = 'ClaudeError'; this.code = code; } // not-found | not-logged-in | limit | timeout | unsafe-folder | failed
+  constructor(code, message) { super(message); this.name = 'ClaudeError'; this.code = code; } // not-found | not-logged-in | billing | limit | timeout | unsafe-folder | failed
 }
 
 const SCRUBBED = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'];
@@ -46,7 +46,9 @@ export function agentFolder(dataDir) {
   }
 }
 
-function classify(message) {
+export function classify(message) {
+  // Its message names an API key too, so it is told apart before the login check (t-6c6c00a9f7).
+  if (/past due|billing|pay or renew/i.test(message)) return new ClaudeError('billing', `Claude Code cannot use the Claude subscription - a payment may be past due. Pay or renew at https://claude.ai/settings/billing, then try again. (${message})`);
   if (/log ?in|auth|credential|api key/i.test(message)) return new ClaudeError('not-logged-in', `Claude Code is not logged in - run "claude" once in a terminal and log in. (${message})`);
   if (/limit|rate|overloaded|quota/i.test(message)) return new ClaudeError('limit', `Claude is at a usage limit: ${message}`);
   return new ClaudeError('failed', `Claude did not answer: ${message}`);
