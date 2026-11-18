@@ -170,6 +170,15 @@ test('the page may send the drop headers across origins', async () => {
   assert.match(res.headers.get('access-control-allow-headers'), /X-Drop-Name, X-Drop-Note, X-Drop-Canvas/);
 });
 
+test("CanvasX Studio's page is let in by default, beside ter-manager's (t-8d7abac0f3)", async () => {
+  for (const origin of ['http://127.0.0.1:7075', 'http://localhost:7075', 'http://localhost:7070']) {
+    const r = await fetch(s.url + '/api/state', { headers: { 'x-notex-token': s.token, origin } });
+    assert.equal(r.status, 200, origin);
+    assert.equal(r.headers.get('access-control-allow-origin'), origin);
+  }
+  assert.equal((await fetch(s.url + '/api/state', { headers: { 'x-notex-token': s.token, origin: 'http://127.0.0.1:7076' } })).status, 403);
+});
+
 test('a send from the composer: files with the user\'s description and message, all of it or none (t-e0f8a22b3a, t-fe28f948b4)', async () => {
   const send = async (fields, files = []) => {
     const fd = new FormData();

@@ -55,7 +55,9 @@ import { History, HistoryError } from './history.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', 'package.json'), 'utf8')).version;
 export const DEFAULT_PORT = 7781;
-export const DEFAULT_ORIGINS = ['http://127.0.0.1:7070', 'http://localhost:7070'];
+// ter-manager's page (7070), and CanvasX Studio's (7075), which uses this engine
+// when ter-manager started it: one engine for both, however it was started (t-8d7abac0f3).
+export const DEFAULT_ORIGINS = ['http://127.0.0.1:7070', 'http://localhost:7070', 'http://127.0.0.1:7075', 'http://localhost:7075'];
 // CanvasX's own page, which talks to the agent through the link (t-76dff4fffe).
 export const CANVASX_ORIGINS = ['http://localhost:9075', 'http://127.0.0.1:9075'];
 export const LINK_FILE = path.join('.notex', 'link.json');
