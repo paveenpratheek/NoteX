@@ -174,7 +174,8 @@ function tokenize(src) {
         attrs.push({ name: a[1], value: decode(a[3] ?? a[4]) });
         j += a[0].length;
       }
-      tokens.push({ type: closing ? 'close' : 'open', name, attrs, selfClose, ...at });
+      // Where the tag starts and ends in the script, so an <Add> can be put into a kept script exactly (t-3425488a33).
+      tokens.push({ type: closing ? 'close' : 'open', name, attrs, selfClose, start: i, end: j, ...at });
       advance(j);
       continue;
     }
@@ -212,6 +213,8 @@ function build(tokens) {
       if (parent.tag !== tag) {
         throw new ScriptError(`</${tag}> does not match <${parent.tag}> opened on line ${parent.line}, column ${parent.col} - close that one first.`, t.line, t.col);
       }
+      parent.closeStart = t.start;
+      parent.closeEnd = t.end;
       finish(parent);
       stack.pop();
       continue;
@@ -261,7 +264,7 @@ function build(tokens) {
       }
     }
     if (++count > LIMITS.items) throw new ScriptError(`a script holds at most ${LIMITS.items} tags - split it into several.`, t.line, t.col);
-    const node = { tag, attrs, children: [], parts: [], line: t.line, col: t.col };
+    const node = { tag, attrs, children: [], parts: [], line: t.line, col: t.col, start: t.start, openEnd: t.end, selfClose: t.selfClose };
     parent.children.push(node);
     // An empty tag may be written <File ...></File> as well as <File .../>.
     if (t.selfClose) finish(node);

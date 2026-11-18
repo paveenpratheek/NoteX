@@ -97,7 +97,7 @@ Later scripts can change the agent's own work:
 | `<Link>` | joins two boxes corner to corner, as the app's own links do; the other box may be in another totem, named by its full address (`Plan (totem) > 1. Sources`) |
 | `<Line>` | draws a line only, between two boxes of one totem |
 | `<ProgressBarLink>` | a progress bar, written inside the `<Area>` it sits in and holding a note's name: `<ProgressBarLink>Todo</ProgressBarLink>`. It shows how much of that note's `- [ ]` checklist is done. NoteX aims the bar at the note and links the box to the note when nothing joins them yet, so no line is drawn by hand. The note must be in the same totem; removing the bar takes that link with it |
-| `<Add>` / `<Edit>` / `<Remove>` | grow, reword or delete the agent's own items |
+| `<Add>` / `<Edit>` / `<Remove>` | grow, reword or delete the agent's own items. On an agent canvas only `<Add at="Totem (totem) > place">` works: NoteX puts it into that totem's kept script, every other character as it was, and draws the whole totem |
 
 `notex_read` returns a canvas as the same script, with every item's id and every totem's owner. An agent reads it first, then writes.
 

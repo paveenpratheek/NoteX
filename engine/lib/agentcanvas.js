@@ -10,7 +10,9 @@
  *   (t-3011840b7e)
  *
  * An agent changes an agent canvas only by sending a whole <Totem> script,
- * which replaces the totem of that name, and only if it draws (t-c42859ce48).
+ * which replaces the totem of that name, and only if it draws (t-c42859ce48);
+ * or an <Add at>, which NoteX puts into the totem's kept script and draws
+ * as that whole script (t-3425488a33).
  * Each totem has a lasting id, tm-<10 hex>, which every script NoteX keeps
  * and shows carries as <Totem id="...">: a script with it replaces that
  * totem, so a new name renames it in the same file. A new totem's file is
@@ -28,7 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { parseScript, ScriptError, LIMITS } from './script.js';
+import { parseScript, ScriptError, LIMITS, unlabel } from './script.js';
 import { layoutTotem, Refusal, move, newIds, emitLateWires } from './layout.js';
 import { visualBox } from './measure.js';
 import { bboxDistance } from './geometry.js';
@@ -44,6 +46,68 @@ export const isAgentCanvas = (dir) => fs.existsSync(path.join(dir, 'agent.json')
  * spare, so no two totems' fields touch (t-7cf455550f, t-5c984630aa). */
 export const TOTEM_GAP = FIELD + CHAIN + 400;
 const SPACING_ROUNDS = 20;
+
+/* The places in a kept totem script an <Add> can go into, each with its
+ * address as NoteX writes it: the totem, its sub-totems, its areas and a
+ * scroll box's pages. */
+const TARGETS = ['Totem', 'SubTotem', 'Area', 'Page'];
+function placesIn(totem) {
+  const out = [];
+  const visit = (node, labels) => {
+    if (TARGETS.includes(node.tag)) out.push({ node, labels });
+    let page = 0;
+    for (const c of node.children || []) {
+      if (c.tag === 'Page') { visit(c, [...labels, `Page ${++page}`]); continue; }
+      if (c.tag === 'SubTotem') { visit(c, [...labels, `${c.attrs.name} (sub-totem)`]); continue; }
+      if (c.tag === 'Area') { visit(c, [...labels, c.attrs.name]); continue; }
+      if (c.tag === 'ScrollBox') { visit(c, [...labels, `${c.attrs.name} (scroll box)`]); continue; }
+      if (c.tag === 'Row' || c.tag === 'Column') visit(c, labels);
+    }
+  };
+  visit(totem, [`${totem.attrs.name} (totem)`]);
+  return out;
+}
+const addressKey = (labels) => labels.map((s) => norm(unlabel(s))).join(' > ');
+
+/* An <Add at> put into a totem's kept script (t-3425488a33): what the Add
+ * holds, exactly as written, goes just before the closing tag of the place
+ * its address names, and every other character of the script stays as it
+ * was. The result is checked as a whole totem script; a Refusal says why
+ * it cannot go in. */
+export function addInto(script, addSrc) {
+  const add = parseScript(addSrc);
+  if (add.kind !== 'add') throw new Refusal('only an <Add> goes into a kept totem script.');
+  const kept = parseScript(script);
+  if (kept.kind !== 'totem') throw new Refusal('the kept script is not a totem script.');
+  const want = addressKey(add.at.split('>'));
+  const places = placesIn(kept.totem);
+  const hit = places.filter((p) => addressKey(p.labels) === want);
+  if (hit.length !== 1) {
+    const some = places.slice(0, 12).map((p) => `"${p.labels.join(' > ')}"`).join(', ');
+    throw new Refusal(hit.length
+      ? `"${add.at}" names ${hit.length} places in ${kept.totem.attrs.name} - two boxes there share that path, so send the whole <Totem> script instead.`
+      : `"${add.at}" names no place in ${kept.totem.attrs.name}'s script. An <Add> on an agent canvas goes into the totem, a sub-totem, an area or a page, named by its full address: ${some}${places.length > 12 ? ', ...' : ''}.`);
+  }
+  const target = hit[0].node;
+  const body = addSrc.slice(add.node.openEnd, add.node.closeStart).replace(/^[ \t]*\r?\n/, '').replace(/\s+$/, '');
+  let merged;
+  if (target.selfClose) {
+    const open = script.slice(target.start, target.openEnd).replace(/\s*\/>$/, '>');
+    merged = `${script.slice(0, target.start)}${open}\n${body}\n</${target.tag}>${script.slice(target.openEnd)}`;
+  } else {
+    const lineStart = script.lastIndexOf('\n', target.closeStart - 1) + 1;
+    const ownLine = !script.slice(lineStart, target.closeStart).trim();
+    merged = ownLine
+      ? `${script.slice(0, lineStart)}${body}\n${script.slice(lineStart)}`
+      : `${script.slice(0, target.closeStart)}${body}${script.slice(target.closeStart)}`;
+  }
+  let parsed;
+  try { parsed = parseScript(merged); } catch (e) {
+    if (e instanceof ScriptError) throw new Refusal(`with the <Add> put into ${kept.totem.attrs.name}'s script${e.line ? ` (line ${e.line} there)` : ''}: ${e.message}`);
+    throw e;
+  }
+  return { script: merged, parsed, totem: kept.totem.attrs.name };
+}
 
 /* Where a script puts each drop it names, as NoteX addresses places: a
  * note's own address, or the box holding a text or file (t-b404914d8f). */
@@ -534,12 +598,24 @@ export class AgentCanvases {
       return this.writer.finish(entry, status, result);
     };
     const parsed = parseScript(entry.script);
-    if (parsed.kind !== 'totem') {
-      const tag = parsed.kind === 'add' ? '<Add>' : '<Edit> and <Remove>';
-      return finish('refused', { message: `${entry.canvas} is an agent canvas, drawn from whole totem scripts - ${tag} cannot change it. Read the totem's script, change it, and send the whole <Totem> script again; it replaces the old one.` });
+    // Item ids change with every render (t-d823364b84), so <Edit id> and <Remove id> cannot name anything here (t-c552268797).
+    if (parsed.kind === 'edit') {
+      return finish('refused', { message: `${entry.canvas} is an agent canvas, drawn from whole totem scripts - <Edit> and <Remove> cannot change it. Send the whole <Totem> script with your change, or <Add at="Totem (totem) > place"> to add to a place.` });
     }
     try {
-      const r = this.render(entry.canvas, { override: { name: parsed.totem.attrs.name, id: parsed.totem.attrs.id || null, script: entry.script, owner: entry.owner } });
+      let override;
+      if (parsed.kind === 'add') {
+        // Put into the totem's kept script, then drawn as that whole script (t-3425488a33).
+        const name = unlabel(parsed.at.split('>')[0]);
+        const t = this.layout(entry.canvas).totems.find((x) => norm(x.name) === norm(name));
+        const kept = t && this.read(entry.canvas, t.file);
+        if (!kept) throw new Refusal(`${entry.canvas} has no totem "${name}" - an <Add> goes into a totem already there; start a new one with a whole <Totem> script.`);
+        const merged = addInto(kept, entry.script);
+        override = { name: merged.totem, id: t.id, script: merged.script, owner: entry.owner };
+      } else {
+        override = { name: parsed.totem.attrs.name, id: parsed.totem.attrs.id || null, script: entry.script, owner: entry.owner };
+      }
+      const r = this.render(entry.canvas, { override });
       if (r === null) return false;
       return finish('written', r);
     } catch (e) {

@@ -53,8 +53,8 @@ export const FORMAT = [
   // A note is at most 420 px, so lines broken by hand break again (t-c60e2fff9d).
   'Write each note item as one whole line and let File Fabric wrap it: a note is at most 420 px wide, so a line broken by hand breaks again.',
   'Write < as &lt; and & as &amp; in text, or wrap text in <![CDATA[ ... ]]>. Two boxes side by side need different names.',
-  // An agent canvas is drawn from one script per totem (t-c42859ce48); drops come from the Inbox (t-2fa309e6c8).
-  'On an agent canvas (notex_canvases marks them) the scripts are the canvas: notex_read gives each totem\'s whole script. To change a totem, send its whole <Canvas><Totem> script again with your change - it replaces the old one; <Add>, <Edit> and <Remove> are refused there.',
+  // An agent canvas is drawn from one script per totem (t-c42859ce48), an <Add> put into one (t-3425488a33); drops come from the Inbox (t-2fa309e6c8).
+  'On an agent canvas (notex_canvases marks them) the scripts are the canvas: notex_read gives each totem\'s whole script. To change a totem, send its whole <Canvas><Totem> script again with your change - it replaces the old one. To add to one place, <Add canvas="..." at="Totem (totem) > Area"> goes into that totem\'s script as it is, and nothing else changes; <Edit> and <Remove> are refused there.',
   // A totem's lasting id, so a rename stays the same totem (t-8464839f1d).
   'Keep the id="tm-..." on its <Totem> tag: a script with that id replaces that totem, so changing its name renames it. A new totem has no id; NoteX gives it one.',
   'Something the user dropped in NoteX\'s Inbox is placed by its drop id: <Note name="..." drop="d-..."/> or <Text drop="d-..."/> for typed text and Markdown, <File drop="d-..."/> for a PDF, Word file or image - only on the agent canvas the user chose for that drop.',

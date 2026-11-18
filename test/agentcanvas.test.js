@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Writer } from '../engine/lib/writer.js';
 import { Bronze } from '../engine/lib/bronze.js';
-import { AgentCanvases } from '../engine/lib/agentcanvas.js';
+import { AgentCanvases, addInto } from '../engine/lib/agentcanvas.js';
 import { readFabric } from '../engine/lib/fabric.js';
 import { buildPlaces } from '../engine/lib/places.js';
 import { parseScript, ScriptError } from '../engine/lib/script.js';
@@ -100,13 +100,19 @@ test('a totem that grows wider pushes the totem after it, never the one before',
   assert.ok(now.B > was.B, 'B moved right to stay clear of A');
 });
 
-test('<Add>, <Edit> and <Remove> are refused on an agent canvas, and a script that does not draw changes nothing', async (t) => {
+test('<Edit> and <Remove> are refused on an agent canvas, and a script that does not draw changes nothing', async (t) => {
   const { writer, board } = setup(t);
   await writer.submit({ script: totem('Engine', '<Area name="Ingest"><Text>x</Text></Area>'), owner: 'claude' });
   const before = fs.readFileSync(path.join(board, 'fabric.json'), 'utf8');
-  const add = await writer.submit({ script: '<Add canvas="Board" at="Engine (totem) > Ingest"><Text>y</Text></Add>', owner: 'claude' });
-  assert.equal(add.status, 'refused');
-  assert.match(add.result.message, /send the whole <Totem> script again/);
+  const edit = await writer.submit({ script: '<Canvas name="Board"><Edit id="a-1">y</Edit></Canvas>', owner: 'claude' });
+  assert.equal(edit.status, 'refused');
+  assert.match(edit.result.message, /<Edit> and <Remove> cannot change it.*<Add at=/);
+  const lost = await writer.submit({ script: '<Add canvas="Board" at="Engine (totem) > Nowhere"><Text>y</Text></Add>', owner: 'claude' });
+  assert.equal(lost.status, 'refused');
+  assert.match(lost.result.message, /names no place in Engine's script.*"Engine \(totem\) > Ingest"/);
+  const noTotem = await writer.submit({ script: '<Add canvas="Board" at="Other (totem) > Ingest"><Text>y</Text></Add>', owner: 'claude' });
+  assert.equal(noTotem.status, 'refused');
+  assert.match(noTotem.result.message, /no totem "Other"/);
   const bad = await writer.submit({ script: totem('Engine', '<File path="C:/no/such/file.pdf"/>'), owner: 'claude' });
   assert.equal(bad.status, 'refused');
   assert.match(bad.result.message, /no file at/);
@@ -336,3 +342,61 @@ test('an ask must keep an <Image> by name, and may redraw it', async () => {
   assert.equal(checkArrangement([totem('Laps', chart(SVG.replace('400', '500')))], 'Board', before).reason, undefined);
   assert.match(checkArrangement([totem('Laps', '<Text>no picture</Text>')], 'Board', before).reason, /it lost the image "Lap times"/);
 });
+
+test('an <Add> on an agent canvas goes into the totem\'s kept script, every other character as it was, and is drawn (t-3425488a33)', async (t) => {
+  const { writer, agent, data, places } = setup(t);
+  const plan = [
+    '<Canvas name="Board">',
+    '  <Totem name="Plan">',
+    '    <Area name="Build">',
+    '      <Note name="Box 1">- [ ] parser &amp; tests</Note>',
+    '      <Note name="Box 2">- [x] layout</Note>',
+    '      <Link from="Box 1" to="Box 2"/>',
+    '    </Area>',
+    '    <Area name="Later"/>',
+    '  </Totem>',
+    '</Canvas>',
+  ].join('\n');
+  assert.equal((await writer.submit({ script: plan, owner: 'claude' })).status, 'written');
+  const file = fileOf(data, 'Plan');
+  const kept = agent.read('Board', file);
+
+  const add = await writer.submit({ script: [
+    '<Add canvas="Board" at="Plan (totem) > Build">',
+    '      <Note name="Box 3">- [ ] ship it</Note>',
+    '      <Link from="Box 2" to="Box 3"/>',
+    '      <Link from="Box 3" to="Box 1"/>',
+    '</Add>',
+  ].join('\n'), owner: 'codex' });
+  assert.equal(add.status, 'written', JSON.stringify(add.result));
+  const now = agent.read('Board', file);
+  const cut = kept.indexOf('    </Area>');
+  assert.equal(now, `${kept.slice(0, cut)}      <Note name="Box 3">- [ ] ship it</Note>\n      <Link from="Box 2" to="Box 3"/>\n      <Link from="Box 3" to="Box 1"/>\n${kept.slice(cut)}`);
+  assert.ok(places().includes('Plan (totem) > Build > Box 3 (note)'));
+  assert.ok(places().includes('Plan (totem) > Build > Box 1 (note)'));
+  // The script it replaced is among the versions, as for a whole script.
+  const versions = path.join(data, 'agent-canvases', 'Board', 'versions', file.replace(/\.totem$/, ''));
+  assert.equal(fs.readFileSync(path.join(versions, fs.readdirSync(versions)[0]), 'utf8'), kept);
+
+  // An empty <Area .../> opens to take it; the totem itself takes one too.
+  assert.equal((await writer.submit({ script: '<Add canvas="Board" at="Plan (totem) > Later"><Note name="Idea">one</Note></Add>', owner: 'claude' })).status, 'written');
+  assert.equal((await writer.submit({ script: '<Add canvas="Board" at="Plan"><Area name="Notes"><Text>loose</Text></Area></Add>', owner: 'claude' })).status, 'written');
+  assert.ok(places().includes('Plan (totem) > Later > Idea (note)'));
+  assert.ok(places().includes('Plan (totem) > Notes'));
+  assert.match(agent.read('Board', file), /<Area name="Later">\n<Note name="Idea">one<\/Note>\n<\/Area>/);
+
+  // What would not draw as a whole totem is refused, and changes nothing.
+  const before = agent.read('Board', file);
+  const dup = await writer.submit({ script: '<Add canvas="Board" at="Plan (totem) > Build"><Link from="Box 3" to="Nowhere"/></Add>', owner: 'claude' });
+  assert.equal(dup.status, 'refused');
+  assert.match(dup.result.message, /with the <Add> put into Plan's script/);
+  assert.equal(agent.read('Board', file), before);
+});
+
+test('addInto finds a sub-totem\'s area by its full address, and a closing tag on the same line', () => {
+  const kept = '<Canvas name="B"><Totem name="Book"><SubTotem name="Ch 1"><Area name="Notes"><Text>a</Text></Area></SubTotem></Totem></Canvas>';
+  const r = addInto(kept, '<Add canvas="B" at="Book (totem) > Ch 1 (sub-totem) > Notes"><Text>b</Text></Add>');
+  assert.equal(r.script, kept.replace('<Text>a</Text></Area>', '<Text>a</Text><Text>b</Text></Area>'));
+  assert.throws(() => addInto(kept, '<Add canvas="B" at="Book (totem) > Notes"><Text>b</Text></Add>'), /names no place in Book's script.*Ch 1 \(sub-totem\) > Notes/);
+});
+

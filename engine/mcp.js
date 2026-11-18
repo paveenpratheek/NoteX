@@ -132,7 +132,7 @@ async function call(name, a = {}) {
         const bits = [`saved ${f.modified.slice(0, 16).replace('T', ' ')} UTC`];
         if (f.open) bits.push('open in File Fabric now - scripts wait');
         if (f.rules) bits.push('the rules canvas - never write on it');
-        if (f.agent) bits.push('an agent canvas - drawn from its totem scripts; send whole <Totem> scripts');
+        if (f.agent) bits.push('an agent canvas - drawn from its totem scripts; send whole <Totem> scripts, or <Add at> to add to one place (t-3425488a33)');
         const s = canvases[f.name];
         if (s && s.waiting.length) bits.push(`${plural(s.waiting.length, 'script')} waiting: ${s.waiting.map((w) => `${w.what} by ${w.owner}`).join('; ')}`);
         const out = [`- ${f.name} (${bits.join(', ')})`];
