@@ -57,6 +57,22 @@ export class History {
     return { on: Boolean(h.on), since: h.since || null, off: h.off || null, kept: this.exists(canvas) };
   }
 
+  /* For the canvas list agents read (t-a26cad59c8): whether history is
+   * kept, how many commits, and the last; null for a canvas with none. */
+  summary(canvas) {
+    const r = this.report(canvas);
+    if (!r.on && !r.kept) return null;
+    let commits = 0, last = null;
+    if (r.kept) {
+      try {
+        commits = Number(this.git(this.dir(canvas), ['rev-list', '--count', 'HEAD']).trim()) || 0;
+        const l = this.log(canvas, 1)[0];
+        if (l) last = { at: l.at, who: l.who };
+      } catch (_) { /* no commits yet */ }
+    }
+    return { on: r.on, since: r.since, commits, last };
+  }
+
   /* ----------------------------------------------------------------- git */
 
   /* git for the history, apart from the user's own git setup: no hooks

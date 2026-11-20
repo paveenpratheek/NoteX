@@ -53,7 +53,7 @@ flowchart LR
   WR --> FF
   DOC --> RAGX["RAGX<br/>embeds and searches"]
   RU --> CL["~/.claude/CLAUDE.md<br/>imports the user's rules"]
-  AG["AI agents (MCP)<br/>notex_canvases · notex_read · notex_write"] --> SC
+  AG["AI agents (MCP)<br/>notex_canvases · notex_read · notex_history · notex_write"] --> SC
   RO --> AG
 ```
 
@@ -150,8 +150,9 @@ Later scripts can change the agent's own work:
 
 | Tool | Purpose |
 |---|---|
-| `notex_canvases` | list canvases, with scripts waiting or done |
-| `notex_read` | a canvas, or one place on it, as a totem script with ids and owners |
+| `notex_canvases` | list canvases, with scripts waiting or done, and whether a canvas keeps its history (commits, last write) |
+| `notex_read` | a canvas, or one place on it, as a totem script with ids and owners; with `when`, an agent canvas's scripts as they stood then, from its history |
+| `notex_history` | an agent canvas's history, newest first: when, who, and which totems were added, changed, renamed or deleted. Read-only: an agent brings a version back by sending it again with `notex_write`, a new commit |
 | `notex_write` | send a totem script; it is written now, or queued while the canvas is open |
 
 ---

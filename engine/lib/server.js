@@ -424,7 +424,10 @@ export async function startServer({
         let counts = { images: null, unread: null };
         try { const b = buildFabric(fdir, { dataDir: dir }); counts = { images: b.images, unread: b.unread }; } catch (_) { /* shown without counts */ }
         // Whether File Fabric has it open: a script for it waits until it is closed (t-a80b904d43).
-        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name, open: writer.isOpen(fdir), agent: isAgentCanvas(fdir) };
+        // Whether its history is kept, for agents to see (t-a26cad59c8).
+        let kept = null;
+        try { kept = history.summary(name); } catch (_) { /* shown without it */ }
+        return { name, modified, size, ...counts, sync: synced[name] || null, rules: config.rules === name, open: writer.isOpen(fdir), agent: isAgentCanvas(fdir), history: kept };
       });
       return json(200, { workspace: needWorkspace(), fabrics });
     }
